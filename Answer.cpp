@@ -137,9 +137,8 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
         if (ufo.itemCount() != 0) {
             int nearest_house_index = -1;
             double nearest_house_distance = INFINITY;
-            repeat (house_index, house_count) {
+            repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
                 auto const & house = stage.houses()[house_index];
-                if (house.delivered()) continue;
 
                 if (target.from_ufo(ufo_index) == house_index and Util::IsIntersect(ufo, house)) {
                     item_count[ufo_index] -= 1;
