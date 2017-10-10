@@ -29,10 +29,62 @@ template <class T> inline void setmin(T & a, T const & b) { a = min(a, b); }
 /// プロコン問題環境を表します。
 namespace hpc {
 
-static const int TARGET_NONE = -1;
-static const int TARGET_DELIVERED = -2;
-array<char, Parameter::UFOCount> target_house;
-array<int, Parameter::MaxHouseCount> targetted_by;
+struct targetting_t {
+    enum { NONE = -1, DELIVERED = -2 };
+    array<int, Parameter::UFOCount> ufo_to_house;
+    array<int, Parameter::MaxHouseCount> house_to_ufo;
+    int from_ufo(int ufo_index) {
+        return ufo_to_house[ufo_index];
+    }
+    int from_house(int house_index) {
+        return house_to_ufo[house_index];
+    }
+    bool is_targetting(int ufo_index) {
+        return ufo_to_house[ufo_index] != NONE;
+    }
+    bool is_delivered(int house_index) {
+        return house_to_ufo[house_index] == DELIVERED;
+    }
+    void link(int ufo_index, int house_index) {
+        unlink_ufo(ufo_index);
+        unlink_house(house_index);
+        ufo_to_house[ufo_index] = house_index;
+        house_to_ufo[house_index] = ufo_index;
+    }
+    void unlink_ufo(int ufo_index) {
+        int & house_index = ufo_to_house[ufo_index];
+        if (house_index == NONE) return;
+        house_to_ufo[house_index] = NONE;
+        house_index = NONE;
+    }
+    void unlink_house(int house_index) {
+        int & ufo_index = house_to_ufo[house_index];
+        if (ufo_index == NONE or ufo_index == DELIVERED) return;
+        ufo_to_house[ufo_index] = NONE;
+        ufo_index = NONE;
+    }
+    void deliver_house(int house_index) {
+        int & ufo_index = house_to_ufo[house_index];
+        ufo_to_house[ufo_index] = NONE;
+        ufo_index = DELIVERED;
+    }
+    void clear() {
+        fill(whole(ufo_to_house), NONE);
+        fill(whole(house_to_ufo), NONE);
+    }
+    void debug(Stage const & stage) {
+        repeat (ufo_index, Parameter::UFOCount) {
+            cerr << ufo_to_house[ufo_index] << ' ';
+        }
+        cerr << endl;
+        int house_count = stage.houses().count();
+        repeat (house_index, house_count) {
+            cerr << house_to_ufo[house_index] << ' ';
+        }
+        cerr << endl;
+    }
+};
+targetting_t target;
 
 //------------------------------------------------------------------------------
 /// Answer クラスのコンストラクタです。
@@ -55,8 +107,7 @@ Answer::~Answer() {
 ///
 /// @param[in] stage 現在のステージ。
 void Answer::init(Stage const & stage) {
-    fill(whole(target_house), TARGET_NONE);
-    fill(whole(targetted_by), TARGET_NONE);
+    target.clear();
 }
 
 //------------------------------------------------------------------------------
@@ -73,32 +124,30 @@ void Answer::init(Stage const & stage) {
 /// @param[in] stage 現在のステージ。
 /// @param[out] actions この受け渡しフェーズの行動を指定する配列。
 void Answer::moveItems(Stage const & stage, Actions & actions) {
-    int ufo_count = stage.ufos().count();
     int house_count = stage.houses().count();
-    repeat (ufo_index, ufo_count) {
+    array<int, Parameter::UFOCount> item_count;
+    repeat (ufo_index, Parameter::UFOCount) {
         auto const & ufo = stage.ufos()[ufo_index];
+        item_count[ufo_index] = ufo.itemCount();
 
         if (Util::IsIntersect(ufo, stage.office())) {
             actions.add(Action::PickUp(ufo_index));
         }
 
         if (ufo.itemCount() != 0) {
-            int delivering_count = 0;
             int nearest_house_index = -1;
             double nearest_house_distance = INFINITY;
-            repeat (house_index, house_count) {
+            repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
                 auto const & house = stage.houses()[house_index];
-                if (house.delivered()) continue;
 
-                if (target_house[ufo_index] == house_index and Util::IsIntersect(ufo, house)) {
-                    delivering_count += 1;
+                if (target.from_ufo(ufo_index) == house_index and Util::IsIntersect(ufo, house)) {
+                    item_count[ufo_index] -= 1;
                     actions.add(Action::Deliver(ufo_index, house_index));
-                    target_house[ufo_index] = TARGET_NONE;
-                    targetted_by[house_index] = TARGET_DELIVERED;
+                    target.deliver_house(house_index);
                     continue;
                 }
 
-                if (targetted_by[house_index] == TARGET_NONE) {
+                if (target.from_house(house_index) == targetting_t::NONE) {
                     double dist = ufo.pos().dist(house.pos());
                     if (dist < nearest_house_distance) {
                         nearest_house_distance = dist;
@@ -107,25 +156,23 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
                 }
             }
 
-            if (target_house[ufo_index] == TARGET_NONE) {
-                if (ufo.itemCount() - delivering_count != 0 and nearest_house_index != -1) {
-                    target_house[ufo_index] = nearest_house_index;
-                    targetted_by[nearest_house_index] = ufo_index;
+            if (not target.is_targetting(ufo_index)) {
+                if (item_count[ufo_index] and nearest_house_index != -1) {
+                    target.link(ufo_index, nearest_house_index);
                 }
             }
 
-            if (ufo.itemCount() - delivering_count != 0 and target_house[ufo_index] == TARGET_NONE) {
-                if (ufo.type() == UFOType_Small) {
-                    repeat (other_ufo_index, ufo_count) {
-                        auto const & other_ufo = stage.ufos()[other_ufo_index];
-                        if (other_ufo.type() != UFOType_Large) continue;
-                        if (target_house[other_ufo_index] != TARGET_NONE) {
-                            int house_index = target_house[other_ufo_index];
-                            target_house[other_ufo_index] = TARGET_NONE;
-                            target_house[ufo_index] = house_index;
-                            targetted_by[house_index] = ufo_index;
-                            break;
-                        }
+            if (item_count[ufo_index] and target.from_ufo(ufo_index) == targetting_t::NONE) {
+                repeat (other_ufo_index, Parameter::UFOCount) if (target.is_targetting(other_ufo_index)) {
+                    auto const & other_ufo = stage.ufos()[other_ufo_index];
+                    int house_index = target.from_ufo(other_ufo_index);
+                    auto const & house = stage.houses()[house_index];
+                    double this_time = ufo.pos().dist(house.pos()) / ufo.maxSpeed();
+                    double other_time = other_ufo.pos().dist(house.pos()) / other_ufo.maxSpeed();
+                    if (this_time < other_time) {
+                        target.unlink_ufo(other_ufo_index);
+                        target.link(ufo_index, house_index);
+                        break;
                     }
                 }
             }
@@ -153,14 +200,15 @@ void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
             target_positions.add(stage.office().pos());
 
         } else {
-            int house_index = target_house[ufo_index];
-            if (house_index != TARGET_NONE) {
+            int house_index = target.from_ufo(ufo_index);
+            if (house_index != targetting_t::NONE) {
                 target_positions.add(stage.houses()[house_index].pos());
             } else {
                 target_positions.add(ufo.pos());
             }
         }
     }
+// target.debug(stage);
 }
 
 //------------------------------------------------------------------------------
