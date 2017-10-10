@@ -164,12 +164,13 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
             }
 
             if (item_count[ufo_index] and target.from_ufo(ufo_index) == targetting_t::NONE) {
-                if (ufo.type() == UFOType_Small) {
-                    repeat (other_ufo_index, Parameter::UFOCount) {
-                        auto const & other_ufo = stage.ufos()[other_ufo_index];
-                        if (other_ufo.type() != UFOType_Large) continue;
-                        if (not target.is_targetting(other_ufo_index)) continue;
-                        int house_index = target.from_ufo(other_ufo_index);
+                repeat (other_ufo_index, Parameter::UFOCount) if (target.is_targetting(other_ufo_index)) {
+                    auto const & other_ufo = stage.ufos()[other_ufo_index];
+                    int house_index = target.from_ufo(other_ufo_index);
+                    auto const & house = stage.houses()[house_index];
+                    double this_time = ufo.pos().dist(house.pos()) / ufo.maxSpeed();
+                    double other_time = other_ufo.pos().dist(house.pos()) / other_ufo.maxSpeed();
+                    if (this_time < other_time) {
                         target.unlink_ufo(other_ufo_index);
                         target.link(ufo_index, house_index);
                         break;
