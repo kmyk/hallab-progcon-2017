@@ -83,7 +83,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
         }
 
         if (ufo.itemCount() != 0) {
-            bool is_delivering = false;
+            int delivering_count = 0;
             int nearest_house_index = -1;
             double nearest_house_distance = INFINITY;
             repeat (house_index, house_count) {
@@ -91,11 +91,11 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
                 if (house.delivered()) continue;
 
                 if (target_house[ufo_index] == house_index and Util::IsIntersect(ufo, house)) {
-                    is_delivering = true;
+                    delivering_count += 1;
                     actions.add(Action::Deliver(ufo_index, house_index));
                     target_house[ufo_index] = TARGET_NONE;
                     targetted_by[house_index] = TARGET_DELIVERED;
-                    break;
+                    continue;
                 }
 
                 if (targetted_by[house_index] == TARGET_NONE) {
@@ -108,9 +108,25 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
             }
 
             if (target_house[ufo_index] == TARGET_NONE) {
-                if (ufo.itemCount() - int(is_delivering) != 0 and nearest_house_index != -1) {
+                if (ufo.itemCount() - delivering_count != 0 and nearest_house_index != -1) {
                     target_house[ufo_index] = nearest_house_index;
                     targetted_by[nearest_house_index] = ufo_index;
+                }
+            }
+
+            if (ufo.itemCount() - delivering_count != 0 and target_house[ufo_index] == TARGET_NONE) {
+                if (ufo.type() == UFOType_Small) {
+                    repeat (other_ufo_index, ufo_count) {
+                        auto const & other_ufo = stage.ufos()[other_ufo_index];
+                        if (other_ufo.type() != UFOType_Large) continue;
+                        if (target_house[other_ufo_index] != TARGET_NONE) {
+                            int house_index = target_house[other_ufo_index];
+                            target_house[other_ufo_index] = TARGET_NONE;
+                            target_house[ufo_index] = house_index;
+                            targetted_by[house_index] = ufo_index;
+                            break;
+                        }
+                    }
                 }
             }
         }
