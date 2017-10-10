@@ -1,4 +1,4 @@
-﻿//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 /// @file
 /// @author   ハル研究所プログラミングコンテスト実行委員会
 ///
@@ -8,104 +8,44 @@
 //------------------------------------------------------------------------------
 
 #include "Answer.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <iostream>
+#include <vector>
+#define repeat(i, n) for (int i = 0; (i) < int(n); ++(i))
+#define repeat_from(i, m, n) for (int i = (m); (i) < int(n); ++(i))
+#define repeat_reverse(i, n) for (int i = (n)-1; (i) >= 0; --(i))
+#define repeat_from_reverse(i, m, n) for (int i = (n)-1; (i) >= int(m); --(i))
+#define whole(x) begin(x), end(x)
+#define unittest_name_helper(counter) unittest_ ## counter
+#define unittest_name(counter) unittest_name_helper(counter)
+#define unittest __attribute__((constructor)) void unittest_name(__COUNTER__) ()
+using ll = long long;
+using namespace std;
+template <class T> inline void setmax(T & a, T const & b) { a = max(a, b); }
+template <class T> inline void setmin(T & a, T const & b) { a = min(a, b); }
 
 /// プロコン問題環境を表します。
 namespace hpc {
 
-static const int TARGET_HOUSE_NONE = -1;
-
-/// 回答コードのサンプルです。
-class Solver
-{
-public:
-    void init(const Stage& aStage)
-    {
-        mTargetHouseIndices.clear();
-
-        // 各UFOは、(houseIndex % ufoCount == ufoIndex)の家を担当する
-        int ufoCount = aStage.ufos().count();
-        for (int ufoIndex = 0; ufoIndex < ufoCount; ++ufoIndex) {
-            mTargetHouseIndices.add(ufoIndex);
-        }
-    }
-
-    void moveItems(const Stage& aStage, Actions& aActions)
-    {
-        int ufoCount = aStage.ufos().count();
-
-        for (int ufoIndex = 0; ufoIndex < ufoCount; ++ufoIndex) {
-            const auto& ufo = aStage.ufos()[ufoIndex];
-
-            // 農場の上にいたら箱を積み込む
-            if (Util::IsIntersect(ufo, aStage.office())) {
-                aActions.add(Action::PickUp(ufoIndex));
-            }
-
-            // 担当の家の上にいたら配達する
-            int houseIndex = mTargetHouseIndices[ufoIndex];
-            if (houseIndex == TARGET_HOUSE_NONE) {
-                continue;
-            }
-
-            if (ufo.itemCount() == 0 || !Util::IsIntersect(ufo, aStage.houses()[houseIndex])) {
-                continue;
-            }
-
-            aActions.add(Action::Deliver(ufoIndex, houseIndex));
-
-            // 目標の家を更新
-            mTargetHouseIndices[ufoIndex] += ufoCount;
-
-            if (mTargetHouseIndices[ufoIndex] >= aStage.houses().count()) {
-                // 担当の家はすべて配達終了
-                mTargetHouseIndices[ufoIndex] = TARGET_HOUSE_NONE;
-            }
-        }
-    }
-
-    void moveUFOs(const Stage& aStage, TargetPositions& aTargetPositions)
-    {
-        int ufoCount = aStage.ufos().count();
-
-        for (int ufoIndex = 0; ufoIndex < ufoCount; ++ufoIndex) {
-            const auto& ufo = aStage.ufos()[ufoIndex];
-
-            if (ufo.itemCount() == 0) {
-                // 箱がなければ農場に向かう
-                aTargetPositions.add(aStage.office().pos());
-            } else {
-                // 箱を積んでいれば担当の家に向かう
-                int houseIndex = mTargetHouseIndices[ufoIndex];
-                if (houseIndex != TARGET_HOUSE_NONE) {
-                    aTargetPositions.add(aStage.houses()[houseIndex].pos());
-                } else {
-                    aTargetPositions.add(ufo.pos());
-                }
-            }
-        }
-    }
-
-private:
-    /// 各UFOが次に向かう家のインデックス。
-    Array<int, Parameter::UFOCount> mTargetHouseIndices;
-};
-
-Solver g_Solver;
+static const int TARGET_NONE = -1;
+static const int TARGET_DELIVERED = -2;
+array<char, Parameter::UFOCount> target_house;
+array<int, Parameter::MaxHouseCount> targetted_by;
 
 //------------------------------------------------------------------------------
 /// Answer クラスのコンストラクタです。
 ///
 /// ここに最初のステージの開始前に行う処理を書くことができます。何も書かなくても構いません。
-Answer::Answer()
-{
+Answer::Answer() {
 }
 
 //------------------------------------------------------------------------------
 /// Answer クラスのデストラクタです。
 ///
 /// ここに最後のステージの終了後に行う処理を書くことができます。何も書かなくても構いません。
-Answer::~Answer()
-{
+Answer::~Answer() {
 }
 
 //------------------------------------------------------------------------------
@@ -113,44 +53,114 @@ Answer::~Answer()
 ///
 /// ここで、各ステージに対して初期処理を行うことができます。
 ///
-/// @param[in] aStage 現在のステージ。
-void Answer::init(const Stage& aStage)
-{
-    g_Solver.init(aStage);
+/// @param[in] stage 現在のステージ。
+void Answer::init(Stage const & stage) {
+    fill(whole(target_house), TARGET_NONE);
+    fill(whole(targetted_by), TARGET_NONE);
 }
 
 //------------------------------------------------------------------------------
 /// 各ターンの、受け渡しフェーズの行動を指定してください。
 ///
-/// - Actionクラスのstatic関数で行動を生成し、aActionsに格納してください。
+/// - Actionクラスのstatic関数で行動を生成し、actionsに格納してください。
 /// - 行動は、配列のインデックスの昇順で実行されます。
 /// - 同じUFOが複数回行動することもできます。
 /// - UFOが箱を持っていないなど、必要な条件を満たしていない場合は何も起こりません。
 ///   条件の詳細はActionクラスを参照してください。
 /// - 1回のフェーズの最大行動数は、Parameter::MaxActionPerTurnです。
-/// - aActionsの要素の、UFOや家のインデックスが範囲外の場合、アサートに失敗します。
+/// - actionsの要素の、UFOや家のインデックスが範囲外の場合、アサートに失敗します。
 ///
-/// @param[in] aStage 現在のステージ。
-/// @param[out] aActions この受け渡しフェーズの行動を指定する配列。
-void Answer::moveItems(const Stage& aStage, Actions& aActions)
-{
-    g_Solver.moveItems(aStage, aActions);
+/// @param[in] stage 現在のステージ。
+/// @param[out] actions この受け渡しフェーズの行動を指定する配列。
+void Answer::moveItems(Stage const & stage, Actions & actions) {
+    int ufo_count = stage.ufos().count();
+    int house_count = stage.houses().count();
+    repeat (ufo_index, ufo_count) {
+        auto const & ufo = stage.ufos()[ufo_index];
+
+        if (Util::IsIntersect(ufo, stage.office())) {
+            actions.add(Action::PickUp(ufo_index));
+        }
+
+        if (ufo.itemCount() != 0) {
+            int delivering_count = 0;
+            int nearest_house_index = -1;
+            double nearest_house_distance = INFINITY;
+            repeat (house_index, house_count) {
+                auto const & house = stage.houses()[house_index];
+                if (house.delivered()) continue;
+
+                if (target_house[ufo_index] == house_index and Util::IsIntersect(ufo, house)) {
+                    delivering_count += 1;
+                    actions.add(Action::Deliver(ufo_index, house_index));
+                    target_house[ufo_index] = TARGET_NONE;
+                    targetted_by[house_index] = TARGET_DELIVERED;
+                    continue;
+                }
+
+                if (targetted_by[house_index] == TARGET_NONE) {
+                    double dist = ufo.pos().dist(house.pos());
+                    if (dist < nearest_house_distance) {
+                        nearest_house_distance = dist;
+                        nearest_house_index = house_index;
+                    }
+                }
+            }
+
+            if (target_house[ufo_index] == TARGET_NONE) {
+                if (ufo.itemCount() - delivering_count != 0 and nearest_house_index != -1) {
+                    target_house[ufo_index] = nearest_house_index;
+                    targetted_by[nearest_house_index] = ufo_index;
+                }
+            }
+
+            if (ufo.itemCount() - delivering_count != 0 and target_house[ufo_index] == TARGET_NONE) {
+                if (ufo.type() == UFOType_Small) {
+                    repeat (other_ufo_index, ufo_count) {
+                        auto const & other_ufo = stage.ufos()[other_ufo_index];
+                        if (other_ufo.type() != UFOType_Large) continue;
+                        if (target_house[other_ufo_index] != TARGET_NONE) {
+                            int house_index = target_house[other_ufo_index];
+                            target_house[other_ufo_index] = TARGET_NONE;
+                            target_house[ufo_index] = house_index;
+                            targetted_by[house_index] = ufo_index;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
 /// 各ターンの、移動フェーズの行動を指定してください。
 /// 
 /// - 各UFOごとに、目標座標を指定してください。
-/// - aTargetPositions[i]が、aStage.ufos()[i]の目標座標となります。
-/// - aTargetPositions.count() == aStage.ufos().count()となるように、配列に座標を追加してください。
+/// - target_positions[i]が、stage.ufos()[i]の目標座標となります。
+/// - target_positions.count() == stage.ufos().count()となるように、配列に座標を追加してください。
 ///   - 要素数が異なる場合はアサートに失敗します。
-/// - aTargetPositionsの要素の値が NaN または ±Inf である場合、アサートに失敗します。
+/// - target_positionsの要素の値が NaN または ±Inf である場合、アサートに失敗します。
 ///
-/// @param[in] aStage 現在のステージ。
-/// @param[out] aTargetPositions 各UFOの目標座標を指定する配列。
-void Answer::moveUFOs(const Stage& aStage, TargetPositions& aTargetPositions)
-{
-    g_Solver.moveUFOs(aStage, aTargetPositions);
+/// @param[in] stage 現在のステージ。
+/// @param[out] target_positions 各UFOの目標座標を指定する配列。
+void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
+    int ufo_count = stage.ufos().count();
+    repeat (ufo_index, ufo_count) {
+        auto const & ufo = stage.ufos()[ufo_index];
+
+        if (ufo.itemCount() == 0) {
+            target_positions.add(stage.office().pos());
+
+        } else {
+            int house_index = target_house[ufo_index];
+            if (house_index != TARGET_NONE) {
+                target_positions.add(stage.houses()[house_index].pos());
+            } else {
+                target_positions.add(ufo.pos());
+            }
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -158,9 +168,8 @@ void Answer::moveUFOs(const Stage& aStage, TargetPositions& aTargetPositions)
 ///
 /// ここにステージ終了時の処理を書くことができます。何も書かなくても構いません。
 ///
-/// @param[in] aStage 現在のステージ。
-void Answer::finalize(const Stage& aStage)
-{
+/// @param[in] stage 現在のステージ。
+void Answer::finalize(Stage const & stage) {
 }
 
 } // namespace
