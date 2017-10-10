@@ -134,7 +134,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
             actions.add(Action::PickUp(ufo_index));
         }
 
-        if (ufo.itemCount() != 0) {
+        if (item_count[ufo_index] != 0) {
             int nearest_house_index = -1;
             double nearest_house_distance = INFINITY;
             repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
