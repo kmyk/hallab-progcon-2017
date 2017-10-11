@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <set>
 #include <vector>
 #define repeat(i, n) for (int i = 0; (i) < int(n); ++(i))
 #define repeat_from(i, m, n) for (int i = (m); (i) < int(n); ++(i))
@@ -122,10 +123,15 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
     }
     int house_count = stage.houses().count();
     constexpr int beam_width = 100;
+    set<pair<uint64_t, int> > used;
     while (true) {
+        used.clear();
         vector<beam_state_t> prev_beam;
         prev_beam.swap(beam);
         for (auto const & s : prev_beam) {
+            auto key = make_pair(hash<bitset<Parameter::MaxHouseCount> >()(s.delivered), s.house);
+            if (used.count(key)) continue;
+            used.insert(key);
             Vector2 pos = s.house == -1 ? stage.office().pos() : stage.houses()[s.house].pos();
             repeat (house_index, house_count) if (not s.delivered[house_index]) {
                 beam_state_t t = s;
