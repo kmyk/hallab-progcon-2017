@@ -168,6 +168,11 @@ void Answer::init(Stage const & a_stage) {
         auto s = beamsearch(stage, delivered_by_large, ufo, 15);
         path[ufo_index] = s.path;
         delivered_by_large = s.delivered;
+#ifdef LOCAL
+cerr << "path " << ufo_index << ": turn " << s.turn << ": ";
+for (int house_index : path[ufo_index]) cerr << house_index << ' ';
+cerr << endl;
+#endif
     }
 
     auto moveItems = [&](Actions & actions) {
@@ -268,6 +273,39 @@ void Answer::init(Stage const & a_stage) {
         stage.moveUFOs(output.target_positions);
         stage.advanceTurn();
         result.push_back(output);
+
+#ifdef LOCAL
+        // debug
+cerr << "turn " << stage.turn() << ": ";
+repeat (house_index, house_count) cerr << stage.houses()[house_index].delivered();
+cerr << " / ";
+repeat (ufo_index, Parameter::UFOCount) cerr << target.from_ufo(ufo_index) << "(" << stage.ufos()[ufo_index].itemCount() << ") ";
+cerr << endl;
+#endif
+
+#ifdef LOCAL
+        // check invariant
+        repeat (ufo_index, Parameter::UFOCount) {
+            int house_index = target.from_ufo(ufo_index);
+            if (house_index == targetting_t::NONE) {
+                // nop
+            } else if (house_index == targetting_t::DELIVERED) {
+                assert (false);
+            } else {
+                assert (target.from_house(house_index) == ufo_index);
+            }
+        }
+        repeat (house_index, stage.houses().count()) {
+            int ufo_index = target.from_house(house_index);
+            if (ufo_index == targetting_t::NONE) {
+                // nop
+            } else if (ufo_index == targetting_t::DELIVERED) {
+                assert (stage.houses()[house_index].delivered());
+            } else {
+                assert (target.from_ufo(ufo_index) == house_index);
+            }
+        }
+#endif
     }
 }
 
