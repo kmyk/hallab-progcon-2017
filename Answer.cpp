@@ -112,7 +112,7 @@ struct beam_state_t {
 };
 bool operator < (beam_state_t const & s, beam_state_t const & t) { return s.turn < t.turn; }  // weak
 bool operator > (beam_state_t const & s, beam_state_t const & t) { return s.turn > t.turn; }
-beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> const & delivered, UFO const & ufo, int required) {
+beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> const & delivered, UFO const & ufo, int turn_limit) {
     vector<beam_state_t> beam; {
         beam_state_t initial = {};
         initial.delivered = delivered;
@@ -122,7 +122,7 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
     }
     int house_count = stage.houses().count();
     constexpr int beam_width = 100;
-    repeat (iteration, required) {
+    while (true) {
         vector<beam_state_t> prev_beam;
         prev_beam.swap(beam);
         for (auto const & s : prev_beam) {
@@ -139,6 +139,7 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
         sort(whole(beam));
         beam.resize(min<int>(beam.size(), beam_width));
         if (int(beam.front().delivered.count()) == house_count) break;
+        if (beam.front().turn > turn_limit) break;
     }
     return beam.front();
 }
@@ -245,39 +246,42 @@ vector<turn_output_t> result;
 ///
 /// @param[in] stage 現在のステージ。
 void Answer::init(Stage const & a_stage) {
-    Stage stage = a_stage;
-    TargetManager target = {};
-    int house_count = stage.houses().count();
+    result.clear();
 
-    vector<vector<int> > path(Parameter::LargeUFOCount);
-    bitset<Parameter::MaxHouseCount> delivered_by_large = {};
-    repeat (ufo_index, Parameter::LargeUFOCount) {
-        auto const & ufo = stage.ufos()[ufo_index];
-        assert (ufo.type() == UFOType_Large);
-        auto s = beamsearch(stage, delivered_by_large, ufo, 15);
-        path[ufo_index] = s.path;
-        delivered_by_large = s.delivered;
+    for (int turn_limit : { 50, 80, 110 }) {
+        Stage stage = a_stage;
+        TargetManager target = {};
+
+        vector<vector<int> > path(Parameter::LargeUFOCount);
+        bitset<Parameter::MaxHouseCount> delivered_by_large = {};
+        repeat (ufo_index, Parameter::LargeUFOCount) {
+            auto const & ufo = stage.ufos()[ufo_index];
+            assert (ufo.type() == UFOType_Large);
+            auto s = beamsearch(stage, delivered_by_large, ufo, turn_limit);
+            path[ufo_index] = s.path;
+            delivered_by_large = s.delivered;
+
 #ifdef LOCAL
 cerr << "path " << ufo_index << ": turn " << s.turn << ": ";
 for (int house_index : path[ufo_index]) cerr << house_index << ' ';
 cerr << endl;
 #endif
-    }
+        }
 
-    result.clear();
-    while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
-        turn_output_t output = {};
-        move_items_with_large_ufos_plan(stage, output.actions, target, path, delivered_by_large);
-        stage.moveItems(output.actions);
-        move_ufos(stage, output.target_positions, target);
-        stage.moveUFOs(output.target_positions);
-        stage.advanceTurn();
-        result.push_back(output);
+        vector<turn_output_t> outputs;
+        while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
+            turn_output_t output = {};
+            move_items_with_large_ufos_plan(stage, output.actions, target, path, delivered_by_large);
+            stage.moveItems(output.actions);
+            move_ufos(stage, output.target_positions, target);
+            stage.moveUFOs(output.target_positions);
+            stage.advanceTurn();
+            outputs.push_back(output);
 
 #ifdef LOCAL
         // debug
 cerr << "turn " << stage.turn() << ": ";
-repeat (house_index, house_count) cerr << stage.houses()[house_index].delivered();
+repeat (house_index, stage.houses().count()) cerr << stage.houses()[house_index].delivered();
 cerr << " / ";
 repeat (ufo_index, Parameter::UFOCount) cerr << target.from_ufo(ufo_index) << "(" << stage.ufos()[ufo_index].itemCount() << ") ";
 cerr << endl;
@@ -306,6 +310,11 @@ cerr << endl;
             }
         }
 #endif
+        }
+
+        if (result.empty() or outputs.size() < result.size()) {
+            result = outputs;
+        }
     }
 }
 
