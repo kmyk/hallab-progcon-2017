@@ -100,6 +100,48 @@ Answer::Answer() {
 Answer::~Answer() {
 }
 
+int turns_to_move(Vector2 const & from, Vector2 const & to, int max_speed) {
+    return ceil(from.dist(to) / max_speed);
+}
+
+struct beam_state_t {
+    bitset<Parameter::MaxHouseCount> delivered;
+    int house;
+    int turn;
+    vector<int> path;
+};
+bool operator < (beam_state_t const & s, beam_state_t const & t) { return s.turn < t.turn; }  // weak
+bool operator > (beam_state_t const & s, beam_state_t const & t) { return s.turn > t.turn; }
+beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> const & delivered, UFO const & ufo, int required) {
+    vector<beam_state_t> beam; {
+        beam_state_t initial = {};
+        initial.delivered = delivered;
+        initial.turn = 0;
+        initial.house = -1;  // the office
+        beam.push_back(initial);
+    }
+    int house_count = stage.houses().count();
+    constexpr int beam_width = 100;
+    repeat (iteration, required) {
+        vector<beam_state_t> prev_beam;
+        prev_beam.swap(beam);
+        for (auto const & s : prev_beam) {
+            Vector2 pos = s.house == -1 ? stage.office().pos() : stage.houses()[s.house].pos();
+            repeat (house_index, house_count) if (not s.delivered[house_index]) {
+                beam_state_t t = s;
+                t.delivered[house_index] = true;
+                t.house = house_index;
+                t.turn += turns_to_move(pos, stage.houses()[house_index].pos(), ufo.maxSpeed());
+                t.path.push_back(house_index);
+                beam.push_back(t);
+            }
+        }
+        sort(whole(beam));
+        beam.resize(min<int>(beam.size(), beam_width));
+        if (int(beam.front().delivered.count()) == house_count) break;
+    }
+    return beam.front();
+}
 
 struct turn_output_t {
     Actions actions;
@@ -118,45 +160,69 @@ void Answer::init(Stage const & a_stage) {
     target.clear();
     int house_count = stage.houses().count();
 
+    vector<vector<int> > path(Parameter::LargeUFOCount);
+    bitset<Parameter::MaxHouseCount> delivered_by_large = {};
+    repeat (ufo_index, Parameter::LargeUFOCount) {
+        auto const & ufo = stage.ufos()[ufo_index];
+        assert (ufo.type() == UFOType_Large);
+        auto s = beamsearch(stage, delivered_by_large, ufo, 15);
+        path[ufo_index] = s.path;
+        delivered_by_large = s.delivered;
+    }
+
     auto moveItems = [&](Actions & actions) {
         array<int, Parameter::UFOCount> item_count;
         repeat (ufo_index, Parameter::UFOCount) {
             auto const & ufo = stage.ufos()[ufo_index];
             item_count[ufo_index] = ufo.itemCount();
 
-            if (Util::IsIntersect(ufo, stage.office())) {
+            if (item_count[ufo_index] < ufo.capacity() and Util::IsIntersect(ufo, stage.office())) {
                 actions.add(Action::PickUp(ufo_index));
             }
 
             if (item_count[ufo_index] != 0) {
-                int nearest_house_index = -1;
-                double nearest_house_distance = INFINITY;
-                repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
+                if (target.is_targetting(ufo_index)) {
+                    int house_index = target.from_ufo(ufo_index);
                     auto const & house = stage.houses()[house_index];
-
-                    if (target.from_ufo(ufo_index) == house_index and Util::IsIntersect(ufo, house)) {
+                    if (Util::IsIntersect(ufo, house)) {
                         item_count[ufo_index] -= 1;
                         actions.add(Action::Deliver(ufo_index, house_index));
                         target.deliver_house(house_index);
-                        continue;
                     }
+                }
 
-                    if (target.from_house(house_index) == targetting_t::NONE) {
-                        double dist = ufo.pos().dist(house.pos());
-                        if (dist < nearest_house_distance) {
-                            nearest_house_distance = dist;
-                            nearest_house_index = house_index;
+                if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
+                    if (ufo.type() == UFOType_Large) {
+                        for (int house_index : path[ufo_index]) {
+                            if (target.from_house(house_index) == targetting_t::NONE) {
+                                target.link(ufo_index, house_index);
+                                break;
+                            }
                         }
                     }
                 }
 
-                if (not target.is_targetting(ufo_index)) {
-                    if (item_count[ufo_index] and nearest_house_index != -1) {
+                if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
+                    int nearest_house_index = -1;
+                    double nearest_house_distance = INFINITY;
+                    repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
+                        auto const & house = stage.houses()[house_index];
+                        if (not delivered_by_large[house_index]) {
+                            if (target.from_house(house_index) == targetting_t::NONE) {
+                                double dist = ufo.pos().dist(house.pos());
+                                if (dist < nearest_house_distance) {
+                                    nearest_house_distance = dist;
+                                    nearest_house_index = house_index;
+                                }
+                            }
+                        }
+                    }
+                    if (nearest_house_index != -1) {
                         target.link(ufo_index, nearest_house_index);
                     }
                 }
 
-                if (item_count[ufo_index] and target.from_ufo(ufo_index) == targetting_t::NONE) {
+                if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
                     repeat (other_ufo_index, Parameter::UFOCount) if (target.is_targetting(other_ufo_index)) {
                         auto const & other_ufo = stage.ufos()[other_ufo_index];
                         int house_index = target.from_ufo(other_ufo_index);
