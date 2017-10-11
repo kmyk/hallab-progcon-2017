@@ -258,7 +258,7 @@ vector<turn_output_t> result;
 void Answer::init(Stage const & a_stage) {
     result.clear();
 
-    for (int turn_limit : { 50, 80, 110 }) {
+    for (int turn_limit : { 35, 50, 65, 80, 95, 110, 125, 140 }) {
         Stage stage = a_stage;
         TargetManager target = {};
 
