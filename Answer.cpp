@@ -122,7 +122,7 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
         beam.push_back(initial);
     }
     int house_count = stage.houses().count();
-    constexpr int beam_width = 100;
+    constexpr int beam_width = 30;
     set<pair<uint64_t, int> > used;
     while (true) {
         used.clear();
