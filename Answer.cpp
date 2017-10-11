@@ -142,8 +142,12 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
                 beam.push_back(t);
             }
         }
-        sort(whole(beam));
-        beam.resize(min<int>(beam.size(), beam_width));
+        if (beam.size() < beam_width) {
+            sort(whole(beam));
+        } else {
+            partial_sort(beam.begin(), beam.begin() + beam_width, beam.end());
+            beam.resize(beam_width);
+        }
         if (int(beam.front().delivered.count()) == house_count) break;
         if (beam.front().turn > turn_limit) break;
     }
