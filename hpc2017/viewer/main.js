@@ -13,7 +13,6 @@ const vm = new Vue({
   },
   created: function () {
     if (location.href.match(/(?:\?|&)data=/)) this.importparam();
-    if (location.href.match(/(?:\?|&)localdata=/)) this.importlocalparam();
   },
   ready: function () {
     setInterval(function () {
@@ -74,13 +73,6 @@ const vm = new Vue({
         }
       };
       xhr.send(null);
-    },
-    // urlの引数で localdata= が指定されている時に呼ばれる
-    importlocalparam: function (e) {
-      setTimeout(function() {
-          vm.json = JSON.parse(localdata);
-          vm.stage = 0;
-      }, 1);
     },
     drag: function (e) {
       const sliderRect = e.target.parentNode.getBoundingClientRect();
