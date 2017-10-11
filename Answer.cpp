@@ -10,6 +10,7 @@
 #include "Answer.hpp"
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -175,7 +176,7 @@ cerr << endl;
 #endif
     }
 
-    auto moveItems = [&](Actions & actions) {
+    auto move_items = [&](Actions & actions) {
         array<int, Parameter::UFOCount> item_count;
         repeat (ufo_index, Parameter::UFOCount) {
             auto const & ufo = stage.ufos()[ufo_index];
@@ -245,7 +246,7 @@ cerr << endl;
         }
     };
 
-    auto moveUFOs = [&](TargetPositions & target_positions) {
+    auto move_ufos = [&](TargetPositions & target_positions) {
         repeat (ufo_index, Parameter::UFOCount) {
             auto const & ufo = stage.ufos()[ufo_index];
 
@@ -267,9 +268,9 @@ cerr << endl;
     result.clear();
     while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
         turn_output_t output = {};
-        moveItems(output.actions);
+        move_items(output.actions);
         stage.moveItems(output.actions);
-        moveUFOs(output.target_positions);
+        move_ufos(output.target_positions);
         stage.moveUFOs(output.target_positions);
         stage.advanceTurn();
         result.push_back(output);
