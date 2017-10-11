@@ -175,8 +175,7 @@ void Answer::init(Stage const & a_stage) {
     };
 
     auto moveUFOs = [&](TargetPositions & target_positions) {
-        int ufo_count = stage.ufos().count();
-        repeat (ufo_index, ufo_count) {
+        repeat (ufo_index, Parameter::UFOCount) {
             auto const & ufo = stage.ufos()[ufo_index];
 
             if (ufo.itemCount() == 0) {
