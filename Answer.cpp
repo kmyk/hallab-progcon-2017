@@ -292,7 +292,7 @@ void Answer::init(Stage const & a_stage) {
     current_stage += 1;
 #endif
 
-    for (int turn_limit : { 35, 50, 65, 80, 95, 110, 125, 140 }) {
+    for (int turn_limit : { 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140 }) {
         Stage stage = a_stage;
         TargetManager target = {};
 
