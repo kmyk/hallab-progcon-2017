@@ -163,9 +163,26 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
 
         if (item_count[ufo_index] < ufo.capacity() and Util::IsIntersect(ufo, stage.office())) {
             actions.add(Action::PickUp(ufo_index));
+            item_count[ufo_index] = ufo.capacity();
+        }
+        if (item_count[ufo_index] < ufo.capacity() and ufo.type() == UFOType_Small) {
+            repeat (large_ufo_index, Parameter::LargeUFOCount) {
+                auto const & large_ufo = stage.ufos()[large_ufo_index];
+                if (Util::IsIntersect(ufo, large_ufo)) {
+                    actions.add(Action::Pass(large_ufo_index, ufo_index));
+                    int delta = min(item_count[large_ufo_index], ufo.capacity() - item_count[ufo_index]);
+                    item_count[ufo_index] += delta;
+                    item_count[large_ufo_index] -= delta;
+                }
+            }
         }
 
-        if (item_count[ufo_index] != 0) {
+        if (item_count[ufo_index] == 0) {
+            if (target.is_targetting(ufo_index)) {
+                target.unlink_ufo(ufo_index);
+            }
+
+        } else {
             if (target.is_targetting(ufo_index)) {
                 int house_index = target.from_ufo(ufo_index);
                 auto const & house = stage.houses()[house_index];
