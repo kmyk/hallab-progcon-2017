@@ -276,6 +276,9 @@ struct turn_output_t {
     TargetPositions target_positions;
 };
 vector<turn_output_t> result;
+#ifdef LOCAL
+int current_stage = -1;
+#endif
 
 //------------------------------------------------------------------------------
 /// 各ステージ開始時に呼び出されます。
@@ -285,6 +288,9 @@ vector<turn_output_t> result;
 /// @param[in] stage 現在のステージ。
 void Answer::init(Stage const & a_stage) {
     result.clear();
+#ifdef LOCAL
+    current_stage += 1;
+#endif
 
     for (int turn_limit : { 35, 50, 65, 80, 95, 110, 125, 140 }) {
         Stage stage = a_stage;
@@ -299,7 +305,7 @@ void Answer::init(Stage const & a_stage) {
             path[ufo_index] = s.path;
             delivered_by_large = s.delivered;
 
-#ifdef LOCAL
+#ifdef DEBUG
 cerr << "path " << ufo_index << ": turn " << s.turn << ": ";
 for (int house_index : path[ufo_index]) cerr << house_index << ' ';
 cerr << endl;
@@ -316,7 +322,7 @@ cerr << endl;
             stage.advanceTurn();
             outputs.push_back(output);
 
-#ifdef LOCAL
+#ifdef DEBUG
         // debug
 cerr << "turn " << stage.turn() << ": ";
 repeat (house_index, stage.houses().count()) cerr << stage.houses()[house_index].delivered();
@@ -326,27 +332,27 @@ cerr << endl;
 #endif
 
 #ifdef LOCAL
-        // check invariant
-        repeat (ufo_index, Parameter::UFOCount) {
-            int house_index = target.from_ufo(ufo_index);
-            if (house_index == TargetManager::NONE) {
-                // nop
-            } else if (house_index == TargetManager::DELIVERED) {
-                assert (false);
-            } else {
-                assert (target.from_house(house_index) == ufo_index);
+            // check invariant
+            repeat (ufo_index, Parameter::UFOCount) {
+                int house_index = target.from_ufo(ufo_index);
+                if (house_index == TargetManager::NONE) {
+                    // nop
+                } else if (house_index == TargetManager::DELIVERED) {
+                    assert (false);
+                } else {
+                    assert (target.from_house(house_index) == ufo_index);
+                }
             }
-        }
-        repeat (house_index, stage.houses().count()) {
-            int ufo_index = target.from_house(house_index);
-            if (ufo_index == TargetManager::NONE) {
-                // nop
-            } else if (ufo_index == TargetManager::DELIVERED) {
-                assert (stage.houses()[house_index].delivered());
-            } else {
-                assert (target.from_ufo(ufo_index) == house_index);
+            repeat (house_index, stage.houses().count()) {
+                int ufo_index = target.from_house(house_index);
+                if (ufo_index == TargetManager::NONE) {
+                    // nop
+                } else if (ufo_index == TargetManager::DELIVERED) {
+                    assert (stage.houses()[house_index].delivered());
+                } else {
+                    assert (target.from_ufo(ufo_index) == house_index);
+                }
             }
-        }
 #endif
         }
 
@@ -354,6 +360,23 @@ cerr << endl;
             result = outputs;
         }
     }
+
+#ifdef LOCAL
+    const char *green = "\x1b[32m";
+    const char *bright_green = "\x1b[32;1m";
+    const char *bright_yellow = "\x1b[33;1m";
+    const char *yellow = "\x1b[33m";
+    const char *bright_red = "\x1b[31;1m";
+    const char *red = "\x1b[31m";
+    const char *color =
+        int(result.size()) <= 50 ? green :
+        int(result.size()) <= 70 ? bright_green :
+        int(result.size()) < 100 ? bright_yellow :
+        int(result.size()) < 130 ? yellow :
+        int(result.size()) < 150 ? bright_red :
+        red;
+    fprintf(stderr, "%5d |%s%5d\x1b[0m\n", current_stage, color, int(result.size()));
+#endif
 }
 
 //------------------------------------------------------------------------------
