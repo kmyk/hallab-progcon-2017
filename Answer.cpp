@@ -247,7 +247,18 @@ void move_ufos(Stage const & stage, TargetPositions & target_positions, TargetMa
         auto const & ufo = stage.ufos()[ufo_index];
 
         if (ufo.itemCount() == 0) {
-            target_positions.add(stage.office().pos());
+            Vector2 pos = stage.office().pos();
+            if (ufo.type() == UFOType_Small) {
+                repeat (large_ufo_index, Parameter::LargeUFOCount) {
+                    auto const & large_ufo = stage.ufos()[large_ufo_index];
+                    if (large_ufo.itemCount() >= 5) {
+                        if (ufo.pos().dist(large_ufo.pos()) < ufo.pos().dist(pos)) {
+                            pos = large_ufo.pos();  // NOTE: The prediction is required.
+                        }
+                    }
+                }
+            }
+            target_positions.add(pos);
 
         } else {
             int house_index = target.from_ufo(ufo_index);
