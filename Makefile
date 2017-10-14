@@ -3,6 +3,8 @@
 build:
 	- ln -s $(PWD)/Answer.cpp hpc2017/src/Answer.cpp
 	$(MAKE) -C hpc2017 all
+clean:
+	$(MAKE) -C hpc2017 clean
 run:
 	$(MAKE) build
 	$(MAKE) -C hpc2017 run
