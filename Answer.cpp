@@ -14,6 +14,7 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <set>
 #include <vector>
 #define repeat(i, n) for (int i = 0; (i) < int(n); ++(i))
@@ -109,6 +110,8 @@ Answer::~Answer() {
 }
 
 namespace Solver {
+
+minstd_rand gen;
 
 /// 座標がstage上にあるかを判定します。
 bool is_on_stage(int y, int x) {
@@ -293,9 +296,6 @@ vector<int> get_countryside_house_indices(int house_count, vector<town_t> const 
 void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns) {
     int house_count = stage.houses().count();
     vector<int> countryside_house_indices = get_countryside_house_indices(house_count, towns);
-    repeat_from (town_index, Parameter::LargeUFOCount, towns.size()) {
-        copy(whole(towns[town_index].house_indices), back_inserter(countryside_house_indices));  // 大きいUFOで管理できないところは田舎ということに
-    }
     array<int, Parameter::UFOCount> item_count;
 
     repeat (ufo_index, Parameter::UFOCount) {
@@ -353,9 +353,9 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     switch (towns.size()) {
                         case 1: if (i < 4) target_index = 0; break;
                         case 2: if (i < 4) target_index = i / 2; break;
-                        case 3:
-                        case 5:
-                        case 4: if (i < 2) target_index = i; break;
+                        case 3: if (i < 2) { target_index = i; } else if (i < uniform_int_distribution<int>(5, 7)(gen)) { target_index = 2; } break;
+                        case 4:
+                        case 5: if (i < 2) target_index = i; break;
                         default: break;
                     }
                 }
@@ -375,6 +375,7 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     if (target.from_house(house_index) == TargetManager::NONE) {
                         double dist = ufo.pos().dist(house.pos());
                         if (dist < nearest_house_distance) {
+                            if (bernoulli_distribution(0.1)(gen)) return;
                             nearest_house_distance = dist;
                             nearest_house_index = house_index;
                         }
@@ -471,9 +472,10 @@ void Answer::init(Stage const & a_stage) {
     current_stage += 1;
 #endif
 
-    towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 1.5, a_stage.houses());
+    towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 2, a_stage.houses());
     sort(whole(towns));
     do {
+        repeat (iteration, 100) {
         Stage stage = a_stage;
         TargetManager target = {};
 
@@ -523,6 +525,7 @@ cerr << endl;
 
         if (result.empty() or outputs.size() < result.size()) {
             result = outputs;
+        }
         }
     } while (next_permutation(whole(towns)));
 
