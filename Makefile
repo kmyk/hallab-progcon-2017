@@ -3,6 +3,8 @@
 build:
 	- ln -s $(PWD)/Answer.cpp hpc2017/src/Answer.cpp
 	$(MAKE) -C hpc2017 all
+clean:
+	$(MAKE) -C hpc2017 clean
 run:
 	$(MAKE) build
 	$(MAKE) -C hpc2017 run
@@ -13,3 +15,6 @@ view:
 server:
 	# npm install -g http-server
 	http-server hpc2017/viewer &
+doc:
+	doxygen
+	x-www-browser html/namespacehpc.html

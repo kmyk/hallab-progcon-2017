@@ -10,16 +10,6 @@ ObjectFiles := $(SourceFiles:%.cpp=%.o)
 DependFiles := $(SourceFiles:%.cpp=%.d)
 ExecuteFile := ./hpc2017.exe
 
-# Atを@にしておくと、コマンドの実行結果出力を抑止できます。
-# 出力が必要な場合は空白を指定します。
-At := @
-#At := 
-
-# ターゲットを出力する、ユーティリティ。
-# 無効にするときは空白を指定します。
-#EchoTarget = @echo '\# $@'
-EchoTarget = 
-
 Compiler := g++
 Linker := g++
 
@@ -28,7 +18,14 @@ Linker := g++
 # -Wshadow : ローカルスコープの名前が、外のスコープの名前を隠している時に警告
 # -Wno-error=sign-compare : 比較時の符号の有無の混在は、警告は出すがエラーにしない
 # -fno-asm, -fno-exceptions : インラインアセンブラ・例外は使用不可(作品規定を参照)
-CompileOption := -std=c++11 -Wall -Werror -Wshadow -Wno-error=sign-compare -fno-asm -fno-exceptions -DLOCAL -MMD -O3
+ifdef DEBUG
+CompileOption := -std=c++11 -Wall -Werror -Wshadow -Wno-error=sign-compare -fno-asm -fno-exceptions -MMD -g -DDEBUG -D_GLIBCXX_DEBUG
+else
+CompileOption := -std=c++11 -Wall -Werror -Wshadow -Wno-error=sign-compare -fno-asm -fno-exceptions -MMD -O3
+endif
+ifndef NOLOCAL
+    CompileOption := $(CompileOption) -DLOCAL
+endif
 LinkOption := -O3
 
 # 処理が重いデバッグ用コードを有効にします。
@@ -41,18 +38,16 @@ LinkOption := -O3
 all : $(ExecuteFile)
 
 $(ExecuteFile) : $(ObjectFiles)
-	$(EchoTarget)
-	$(At) $(Linker) $(LinkOption) $(ObjectFiles) -o $(ExecuteFile)
+	$(Linker) $(LinkOption) $(ObjectFiles) -o $(ExecuteFile)
 
 clean :
-	$(EchoTarget)
-	$(At) rm -fv $(ExecuteFile) $(ObjectFiles) $(DependFiles) $(ExecuteFile).stackdump
+	rm -fv $(ExecuteFile) $(ObjectFiles) $(DependFiles) $(ExecuteFile).stackdump
 
 run : $(ExecuteFile)
-	$(At) $(ExecuteFile)
+	$(ExecuteFile)
 
 json : $(ExecuteFile)
-	$(At) $(ExecuteFile) -j
+	@ $(ExecuteFile) -j
 
 help :
 	@echo '--- ターゲット一覧 ---'
@@ -63,8 +58,7 @@ help :
 	@echo '- json    : jsonを出力する。'
 
 %.o : %.cpp Makefile
-	$(At) $(EchoTarget)
-	$(At) $(Compiler) $(CompileOption) -c $< -o $@
+	$(Compiler) $(CompileOption) -c $< -o $@
 
 #-------------------------------------------------------------------------------
 -include $(DependFiles)
