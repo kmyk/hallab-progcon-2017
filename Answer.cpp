@@ -295,10 +295,6 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
             item_count[ufo_index] = ufo.capacity();
         }
 
-        // 大きいUFOは配達しない (とりあえず)
-        // TODO: 当然配達した方が良い
-        if (ufo.type() == UFOType_Large) continue;
-
         // 大きいUFOに接触しているなら補給
         // 街の大きさは20とかなので全部ひとつでまかなえる
         if (item_count[ufo_index] < ufo.capacity() and ufo.type() == UFOType_Small) {
@@ -335,11 +331,20 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
             if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
                 // 担当範囲を選択 大きいUFOへの同伴か否か
                 int target_index = -1;
-                switch (towns.size()) {
-                    case 1: if (ufo_index - Parameter::LargeUFOCount < 4) target_index = 0; break;
-                    case 2: if (ufo_index - Parameter::LargeUFOCount < 4) target_index = (ufo_index - Parameter::LargeUFOCount) / 2; break;
-                    case 3: if (ufo_index - Parameter::LargeUFOCount < 2) target_index = ufo_index - Parameter::LargeUFOCount; break;
-                    default: break;
+                if (ufo.type() == UFOType_Large) {
+                    if (ufo_index < towns.size()) {
+                        target_index = ufo_index;
+                    }
+                } else {
+                    int i = ufo_index - Parameter::LargeUFOCount;
+                    switch (towns.size()) {
+                        case 1: if (i < 4) target_index = 0; break;
+                        case 2: if (i < 4) target_index = i / 2; break;
+                        case 3:
+                        case 5:
+                        case 4: if (i < 2) target_index = i; break;
+                        default: break;
+                    }
                 }
                 vector<int> const *target_house_indices_ptr;
                 if (target_index == -1) {
@@ -414,20 +419,14 @@ void move_ufos_with_towns(Stage const & stage, TargetPositions & target_position
             target_positions.add(pos);
 
         } else {
-            if (ufo.type() == UFOType_Large) {
-                // 街の中心へ向かう
-                target_positions.add(towns[ufo_index].center);
+            // 家へ向かう
+            int house_index = target.from_ufo(ufo_index);
+            if (house_index != TargetManager::NONE) {
+                target_positions.add(stage.houses()[house_index].pos());
 
+            // 暇なら待機
             } else {
-                // 家へ向かう
-                int house_index = target.from_ufo(ufo_index);
-                if (house_index != TargetManager::NONE) {
-                    target_positions.add(stage.houses()[house_index].pos());
-
-                // 暇なら待機
-                } else {
-                    target_positions.add(ufo.pos());
-                }
+                target_positions.add(ufo.pos());
             }
         }
     }
