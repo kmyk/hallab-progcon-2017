@@ -374,8 +374,11 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     auto const & house = stage.houses()[house_index];
                     if (target.from_house(house_index) == TargetManager::NONE) {
                         double dist = ufo.pos().dist(house.pos());
-                        if (dist < nearest_house_distance) {
-                            if (bernoulli_distribution(0.1)(gen)) return;
+                        bool pred = dist < nearest_house_distance;
+                        if (stage.turn() == 0 and bernoulli_distribution(0.1)(gen)) {
+                            pred = not pred or nearest_house_index == -1;
+                        }
+                        if (pred) {
                             nearest_house_distance = dist;
                             nearest_house_index = house_index;
                         }
