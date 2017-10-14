@@ -31,6 +31,9 @@ template <class T> inline void setmin(T & a, T const & b) { a = min(a, b); }
 /// プロコン問題環境を表します。
 namespace hpc {
 
+/// こちらで勝手に定義した部分はここに
+namespace Solver {
+
 /// UFOと家の双方向の対応を管理します。NONE,DELIVEREDなものを除けば全単射が保証されます。
 struct TargetManager {
     TargetManager() {
@@ -88,6 +91,8 @@ struct TargetManager {
     }
 };
 
+}
+
 //------------------------------------------------------------------------------
 /// Answer クラスのコンストラクタです。
 ///
@@ -101,6 +106,8 @@ Answer::Answer() {
 /// ここに最後のステージの終了後に行う処理を書くことができます。何も書かなくても構いません。
 Answer::~Answer() {
 }
+
+namespace Solver {
 
 /// 2点間の移動に要するターン数を計算します。
 ///
@@ -301,6 +308,8 @@ vector<turn_output_t> result;
 int current_stage = -1;
 #endif
 
+}
+
 //------------------------------------------------------------------------------
 /// 各ステージ開始時に呼び出されます。
 ///
@@ -308,6 +317,8 @@ int current_stage = -1;
 ///
 /// @param[in] stage 現在のステージ。
 void Answer::init(Stage const & a_stage) {
+    using namespace Solver;
+
     result.clear();
 #ifdef LOCAL
     current_stage += 1;
@@ -414,6 +425,7 @@ cerr << endl;
 /// @param[in] stage 現在のステージ。
 /// @param[out] actions この受け渡しフェーズの行動を指定する配列。
 void Answer::moveItems(Stage const & stage, Actions & actions) {
+    using namespace Solver;
     actions = result[stage.turn()].actions;
 }
 
@@ -429,6 +441,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
 /// @param[in] stage 現在のステージ。
 /// @param[out] target_positions 各UFOの目標座標を指定する配列。
 void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
+    using namespace Solver;
     target_positions = result[stage.turn()].target_positions;
 }
 
