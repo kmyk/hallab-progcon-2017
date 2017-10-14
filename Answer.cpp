@@ -144,7 +144,7 @@ vector<town_t> detect_towns(Houses const & houses) {
     auto & cnt = *cnt_ptr;
     repeat (house_index, houses.count()) {
         auto const & house = houses[house_index];
-        repeat_from (dy, - StageParameter::TownRadius - 1, StageParameter::TownRadius + 2) {  // -1, +1 は余裕
+        repeat_from (dy, - StageParameter::TownRadius, StageParameter::TownRadius + 1) {
             int y = house.pos().y + dy;
             if (0 <= y and y < Parameter::StageHeight) {
                 int dx = ceil(sqrt(pow(StageParameter::TownRadius, 2) - pow(dy, 2)));
@@ -166,6 +166,7 @@ repeat (y, Parameter::StageHeight) if (y % 10 == 0) {
         fprintf(stderr, "%d", cnt[y][x]/4);
     }
     fprintf(stderr, "\n");
+}
 fprintf(stderr, "\n");
 #endif
 
@@ -180,7 +181,7 @@ fprintf(stderr, "\n");
         cnt[y][x] = -1;  // 使用済みflagを同居 汚ないが時空間効率のため
         repeat_from (ny, y - 1, y + 2) {
             repeat_from (nx, x - 1, x + 2) {
-                if (is_on_stage(ny, nx) and cnt[ny][nx] >= StageParameter::TownHouseCount - 2) {  // -2 は余裕。下の開始位置のそれより大きめに
+                if (is_on_stage(ny, nx) and cnt[ny][nx] >= dfs_max_cnt - 1) {
                     dfs(ny, nx);
                 }
             }
@@ -189,7 +190,7 @@ fprintf(stderr, "\n");
     vector<Vector2> town_centers;
     repeat (y, Parameter::StageHeight) {
         repeat (x, Parameter::StageWidth) {
-            if (cnt[y][x] >= StageParameter::TownHouseCount - 1) {  // -1 は余裕
+            if (cnt[y][x] >= StageParameter::TownHouseCount) {
                 dfs_max_cnt = -1;
                 dfs(y, x);
                 town_centers.push_back(dfs_pos);
@@ -215,6 +216,37 @@ fprintf(stderr, "\n");
 #endif
         towns.push_back(town);
     }
+
+    // 衝突してたら併合
+    repeat (town_index, towns.size()) {
+        auto const & town = towns[town_index];
+        repeat (other_town_index, towns.size()) if (town_index != other_town_index) {
+            auto const & other_town = towns[other_town_index];
+            if (town.house_indices.size() <= other_town.house_indices.size()) {
+                vector<int> intersection;
+                set_intersection(whole(town.house_indices), whole(other_town.house_indices), back_inserter(intersection));
+                if (intersection.size() >= 10) {
+                    towns.erase(towns.begin() + town_index);
+                    -- town_index;
+                    break;
+                }
+            }
+        }
+    }
+#ifdef DEBUG
+fprintf(stderr, "merged:\n");
+repeat (town_index, towns.size()) {
+auto const & town = towns[town_index];
+fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
+for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
+fprintf(stderr, "\n");
+}
+#endif
+
+    // 確認
+#ifdef LOCAL
+    assert (StageParameter::MinTownCount <= towns.size() and towns.size() <= StageParameter::MaxTownCount);
+#endif
     return towns;
 }
 
