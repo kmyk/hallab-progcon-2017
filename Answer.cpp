@@ -14,6 +14,7 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <set>
 #include <vector>
 #define repeat(i, n) for (int i = 0; (i) < int(n); ++(i))
@@ -110,6 +111,8 @@ Answer::~Answer() {
 
 namespace Solver {
 
+minstd_rand gen;
+
 /// 座標がstage上にあるかを判定します。
 bool is_on_stage(int y, int x) {
     return 0 <= y and y < Parameter::StageHeight and 0 <= x and x < Parameter::StageWidth;
@@ -135,6 +138,34 @@ struct town_t {
     Vector2 center;
     vector<int> house_indices;
 };
+bool operator < (town_t const & a, town_t const & b) {
+    if (a.center == b.center) {
+        return a.house_indices < b.house_indices;
+    }
+    return make_pair(a.center.y, a.center.x) < make_pair(b.center.y, b.center.x);
+}
+
+vector<town_t> reconstruct_towns_from_centers(vector<Vector2> const & town_centers, int radius, Houses const & houses) {
+    vector<town_t> towns;
+    for (auto town_center : town_centers) {
+        town_t town = {};
+        town.center = town_center;
+        repeat (house_index, houses.count()) {
+            auto const & house = houses[house_index];
+            if (house.pos().dist(town.center) <= radius) {
+                town.house_indices.push_back(house_index);
+            }
+        }
+#ifdef DEBUG
+fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
+for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
+fprintf(stderr, "\n");
+#endif
+        towns.push_back(town);
+    }
+    return towns;
+}
+
 /// 街を検出し列挙します。
 vector<town_t> detect_towns(Houses const & houses) {
 
@@ -199,23 +230,7 @@ fprintf(stderr, "\n");
     }
 
     // 街を復元
-    vector<town_t> towns;
-    for (auto town_center : town_centers) {
-        town_t town = {};
-        town.center = town_center;
-        repeat (house_index, houses.count()) {
-            auto const & house = houses[house_index];
-            if (house.pos().dist(town.center) <= StageParameter::TownRadius + 3) { // 3 は余裕
-                town.house_indices.push_back(house_index);
-            }
-        }
-#ifdef DEBUG
-fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
-for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
-fprintf(stderr, "\n");
-#endif
-        towns.push_back(town);
-    }
+    vector<town_t> towns = reconstruct_towns_from_centers(town_centers, StageParameter::TownRadius + 3, houses); // 3 は余裕
 
     // 衝突してたら併合
     repeat (town_index, towns.size()) {
@@ -250,6 +265,14 @@ fprintf(stderr, "\n");
     return towns;
 }
 
+vector<Vector2> get_town_centers(vector<town_t> const & towns) {
+    vector<Vector2> poss;
+    for (auto const & town : towns) {
+        poss.push_back(town.center);
+    }
+    return poss;
+}
+
 /// 2点間の移動に要するターン数を計算します。
 ///
 /// @note 改善余地あり。半径とかをまったく考慮していない。
@@ -257,64 +280,24 @@ int turns_to_move(Vector2 const & from, Vector2 const & to, int max_speed) {
     return ceil(from.dist(to) / max_speed);
 }
 
-/// ビームサーチにおける状態。
-struct beam_state_t {
-    bitset<Parameter::MaxHouseCount> delivered;
-    int house;
-    int turn;
-    vector<int> path;
-};
-bool operator < (beam_state_t const & s, beam_state_t const & t) { return s.turn < t.turn; }  // weak
-bool operator > (beam_state_t const & s, beam_state_t const & t) { return s.turn > t.turn; }
-
-/// ビームサーチでUFOの軌道を構成します。
-///
-/// @param[in] turn_limit 打ち切りターン数
-beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> const & delivered, UFO const & ufo, int turn_limit) {
-    vector<beam_state_t> beam; {
-        beam_state_t initial = {};
-        initial.delivered = delivered;
-        initial.turn = 0;
-        initial.house = -1;  // the office
-        beam.push_back(initial);
-    }
-    int house_count = stage.houses().count();
-    constexpr int beam_width = 30;
-    set<pair<uint64_t, int> > used;
-    while (true) {
-        used.clear();
-        vector<beam_state_t> prev_beam;
-        prev_beam.swap(beam);
-        for (auto const & s : prev_beam) {
-            auto key = make_pair(hash<bitset<Parameter::MaxHouseCount> >()(s.delivered), s.house);
-            if (used.count(key)) continue;
-            used.insert(key);
-            Vector2 pos = s.house == -1 ? stage.office().pos() : stage.houses()[s.house].pos();
-            repeat (house_index, house_count) if (not s.delivered[house_index]) {
-                beam_state_t t = s;
-                t.delivered[house_index] = true;
-                t.house = house_index;
-                t.turn += turns_to_move(pos, stage.houses()[house_index].pos(), ufo.maxSpeed());
-                t.path.push_back(house_index);
-                beam.push_back(t);
-            }
+/// 街に所属しない家の一覧を取得
+vector<int> get_countryside_house_indices(int house_count, vector<town_t> const & towns) {
+    vector<int> xs(house_count);
+    iota(whole(xs), 0);
+    for (auto const & town : towns) {
+        for (int house_index : town.house_indices) {
+            xs[house_index] = -1;
         }
-        if (beam.size() < beam_width) {
-            sort(whole(beam));
-        } else {
-            partial_sort(beam.begin(), beam.begin() + beam_width, beam.end());
-            beam.resize(beam_width);
-        }
-        if (int(beam.front().delivered.count()) == house_count) break;
-        if (beam.front().turn > turn_limit) break;
     }
-    return beam.front();
+    xs.erase(remove(whole(xs), -1), xs.end());
+    return xs;
 }
 
-/// ビームサーチで事前構築された移動計画に沿って、いい感じにActionsを構成します。
-void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, TargetManager & target, vector<vector<int> > const & large_path, bitset<Parameter::MaxHouseCount> const & delivered_by_large) {
+void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns) {
     int house_count = stage.houses().count();
+    vector<int> countryside_house_indices = get_countryside_house_indices(house_count, towns);
     array<int, Parameter::UFOCount> item_count;
+
     repeat (ufo_index, Parameter::UFOCount) {
         auto const & ufo = stage.ufos()[ufo_index];
         item_count[ufo_index] = ufo.itemCount();
@@ -324,7 +307,9 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
             actions.add(Action::PickUp(ufo_index));
             item_count[ufo_index] = ufo.capacity();
         }
-        // 大きいUFOに接触しているならたいてい補給した方がよい
+
+        // 大きいUFOに接触しているなら補給
+        // 街の大きさは20とかなので全部ひとつでまかなえる
         if (item_count[ufo_index] < ufo.capacity() and ufo.type() == UFOType_Small) {
             repeat (large_ufo_index, Parameter::LargeUFOCount) {
                 auto const & large_ufo = stage.ufos()[large_ufo_index];
@@ -355,32 +340,53 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
                 }
             }
 
-            // 目標がないなら、大きなUFOは(存在するなら)計画に沿って移動
+            // 目標がないなら、家を宣言
             if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
+                // 担当範囲を選択 大きいUFOへの同伴か否か
+                int target_index = -1;
                 if (ufo.type() == UFOType_Large) {
-                    for (int house_index : large_path[ufo_index]) {
-                        if (target.from_house(house_index) == TargetManager::NONE) {
-                            target.link(ufo_index, house_index);
-                            break;
-                        }
+                    if (ufo_index < towns.size()) {
+                        target_index = ufo_index;
+                    }
+                } else {
+                    int i = ufo_index - Parameter::LargeUFOCount;
+                    switch (towns.size()) {
+                        case 1: if (i < 4) target_index = 0; break;
+                        case 2: if (i < 4) target_index = i / 2; break;
+                        case 3: if (i < 2) { target_index = i; } else if (i < uniform_int_distribution<int>(5, 7)(gen)) { target_index = 2; } break;
+                        case 4:
+                        case 5: if (i < 2) target_index = i; break;
+                        default: break;
                     }
                 }
-            }
+                vector<int> const *target_house_indices_ptr;
+                if (target_index == -1) {
+                    target_house_indices_ptr = &countryside_house_indices;
+                } else {
+                    target_house_indices_ptr = &towns[target_index].house_indices;
+                }
 
-            // 目標がないなら、とりあえず近い家を宣言する
-            if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
+                // 一番近いものを選択
                 int nearest_house_index = -1;
                 double nearest_house_distance = INFINITY;
-                repeat (house_index, house_count) if (not target.is_delivered(house_index)) {
+                auto update = [&](int house_index) {
+                    if (target.is_delivered(house_index)) return;
                     auto const & house = stage.houses()[house_index];
-                    if (not delivered_by_large[house_index]) {
-                        if (target.from_house(house_index) == TargetManager::NONE) {
-                            double dist = ufo.pos().dist(house.pos());
-                            if (dist < nearest_house_distance) {
-                                nearest_house_distance = dist;
-                                nearest_house_index = house_index;
-                            }
+                    if (target.from_house(house_index) == TargetManager::NONE) {
+                        double dist = ufo.pos().dist(house.pos());
+                        if (dist < nearest_house_distance) {
+                            if (bernoulli_distribution(0.1)(gen)) return;
+                            nearest_house_distance = dist;
+                            nearest_house_index = house_index;
                         }
+                    }
+                };
+                for (int house_index : *target_house_indices_ptr) {
+                    update(house_index);
+                }
+                if (nearest_house_index == -1) {
+                    repeat (house_index, house_count) {
+                        update(house_index);  // 担当範囲が空なら他のをやる
                     }
                 }
                 if (nearest_house_index != -1) {
@@ -407,7 +413,7 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
     }
 }
 
-void move_ufos(Stage const & stage, TargetPositions & target_positions, TargetManager & target) {
+void move_ufos_with_towns(Stage const & stage, TargetPositions & target_positions, TargetManager & target, vector<town_t> const & towns) {
     repeat (ufo_index, Parameter::UFOCount) {
         auto const & ufo = stage.ufos()[ufo_index];
 
@@ -426,8 +432,8 @@ void move_ufos(Stage const & stage, TargetPositions & target_positions, TargetMa
             }
             target_positions.add(pos);
 
-        // 家へ向かう
         } else {
+            // 家へ向かう
             int house_index = target.from_ufo(ufo_index);
             if (house_index != TargetManager::NONE) {
                 target_positions.add(stage.houses()[house_index].pos());
@@ -461,37 +467,24 @@ void Answer::init(Stage const & a_stage) {
     using namespace Solver;
 
     result.clear();
+    vector<town_t> towns = detect_towns(a_stage.houses());
 #ifdef LOCAL
     current_stage += 1;
 #endif
-detect_towns(a_stage.houses());
 
-    for (int turn_limit : { 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140 }) {
+    towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 2, a_stage.houses());
+    sort(whole(towns));
+    do {
+        repeat (iteration, 100) {
         Stage stage = a_stage;
         TargetManager target = {};
-
-        vector<vector<int> > path(Parameter::LargeUFOCount);
-        bitset<Parameter::MaxHouseCount> delivered_by_large = {};
-        repeat (ufo_index, Parameter::LargeUFOCount) {
-            auto const & ufo = stage.ufos()[ufo_index];
-            assert (ufo.type() == UFOType_Large);
-            auto s = beamsearch(stage, delivered_by_large, ufo, turn_limit);
-            path[ufo_index] = s.path;
-            delivered_by_large = s.delivered;
-
-#ifdef DEBUG
-cerr << "path " << ufo_index << ": turn " << s.turn << ": ";
-for (int house_index : path[ufo_index]) cerr << house_index << ' ';
-cerr << endl;
-#endif
-        }
 
         vector<turn_output_t> outputs;
         while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
             turn_output_t output = {};
-            move_items_with_large_ufos_plan(stage, output.actions, target, path, delivered_by_large);
+            move_items_with_towns(stage, output.actions, target, towns);
             stage.moveItems(output.actions);
-            move_ufos(stage, output.target_positions, target);
+            move_ufos_with_towns(stage, output.target_positions, target, towns);
             stage.moveUFOs(output.target_positions);
             stage.advanceTurn();
             outputs.push_back(output);
@@ -533,7 +526,8 @@ cerr << endl;
         if (result.empty() or outputs.size() < result.size()) {
             result = outputs;
         }
-    }
+        }
+    } while (next_permutation(whole(towns)));
 
 #ifdef LOCAL
     const char *green = "\x1b[32m";
