@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <vector>
 #define repeat(i, n) for (int i = 0; (i) < int(n); ++(i))
@@ -108,6 +109,114 @@ Answer::~Answer() {
 }
 
 namespace Solver {
+
+/// 座標がstage上にあるかを判定します。
+bool is_on_stage(int y, int x) {
+    return 0 <= y and y < Parameter::StageHeight and 0 <= x and x < Parameter::StageWidth;
+}
+bool is_on_stage(Vector2 pos) {
+    return is_on_stage(pos.y, pos.x);
+}
+
+/// hpc::Stage が実装内部に持ってる定数群です。
+namespace StageParameter {
+const int MinTownCount = 2;
+const int MaxTownCount = 3;
+const int TownRadius = 100;
+const int TownHouseCount = 20;
+const int MinRandomHouseCount = 5;
+const int MaxRandomHouseCount = 40;
+const int OfficeMargin = 150;
+const int FieldMargin = 20;
+}
+
+/// 検出された街を表現する構造体
+struct town_t {
+    Vector2 center;
+    vector<int> house_indices;
+};
+/// 街を検出し列挙します。
+vector<town_t> detect_towns(Houses const & houses) {
+
+    // 各位置から半径TownRadiusで見える家の数を数える。imos法でO(Nr + HW)
+    typedef array<array<int8_t, Parameter::StageWidth + 1>, Parameter::StageHeight> cnt_array_t;
+    auto cnt_ptr = unique_ptr<cnt_array_t>(new cnt_array_t {});
+    auto & cnt = *cnt_ptr;
+    repeat (house_index, houses.count()) {
+        auto const & house = houses[house_index];
+        repeat_from (dy, - StageParameter::TownRadius - 1, StageParameter::TownRadius + 2) {  // -1, +1 は余裕
+            int y = house.pos().y + dy;
+            if (0 <= y and y < Parameter::StageHeight) {
+                int dx = ceil(sqrt(pow(StageParameter::TownRadius, 2) - pow(dy, 2)));
+                int xl = max(0, min<int>(Parameter::StageWidth - 1, house.pos().x - dx));
+                int xr = max(0, min<int>(Parameter::StageWidth - 1, house.pos().x + dx));
+                cnt[y][xl] += 1;
+                cnt[y][xr + 1] -= 1;
+            }
+        }
+    }
+    repeat (y, Parameter::StageHeight) {
+        repeat (x, Parameter::StageWidth) {
+            cnt[y][x + 1] += cnt[y][x];
+        }
+    }
+#ifdef DEBUG
+repeat (y, Parameter::StageHeight) if (y % 10 == 0) {
+    repeat (x, Parameter::StageWidth) if (x % 10 == 0) {
+        fprintf(stderr, "%d", cnt[y][x]/4);
+    }
+    fprintf(stderr, "\n");
+fprintf(stderr, "\n");
+#endif
+
+    // 適当な位置からDFSして中心を判断
+    int dfs_max_cnt = -1;
+    Vector2 dfs_pos;
+    function<void (int, int)> dfs = [&](int y, int x) {
+        if (dfs_max_cnt < cnt[y][x]) {  // TODO: これだと真の中心にはならない
+            dfs_max_cnt = cnt[y][x];
+            dfs_pos = Vector2(x, y);
+        }
+        cnt[y][x] = -1;  // 使用済みflagを同居 汚ないが時空間効率のため
+        repeat_from (ny, y - 1, y + 2) {
+            repeat_from (nx, x - 1, x + 2) {
+                if (is_on_stage(ny, nx) and cnt[ny][nx] >= StageParameter::TownHouseCount - 2) {  // -2 は余裕。下の開始位置のそれより大きめに
+                    dfs(ny, nx);
+                }
+            }
+        }
+    };
+    vector<Vector2> town_centers;
+    repeat (y, Parameter::StageHeight) {
+        repeat (x, Parameter::StageWidth) {
+            if (cnt[y][x] >= StageParameter::TownHouseCount - 1) {  // -1 は余裕
+                dfs_max_cnt = -1;
+                dfs(y, x);
+                town_centers.push_back(dfs_pos);
+            }
+        }
+    }
+
+    // 街を復元
+    vector<town_t> towns;
+    for (auto town_center : town_centers) {
+        town_t town = {};
+        town.center = town_center;
+        repeat (house_index, houses.count()) {
+            auto const & house = houses[house_index];
+            if (house.pos().dist(town.center) <= StageParameter::TownRadius + 3) { // 3 は余裕
+                town.house_indices.push_back(house_index);
+            }
+        }
+#ifdef DEBUG
+fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
+for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
+fprintf(stderr, "\n");
+#endif
+        towns.push_back(town);
+    }
+    return towns;
+}
 
 /// 2点間の移動に要するターン数を計算します。
 ///
@@ -323,6 +432,7 @@ void Answer::init(Stage const & a_stage) {
 #ifdef LOCAL
     current_stage += 1;
 #endif
+detect_towns(a_stage.houses());
 
     for (int turn_limit : { 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140 }) {
         Stage stage = a_stage;
