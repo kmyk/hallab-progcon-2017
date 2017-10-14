@@ -142,6 +142,27 @@ bool operator < (town_t const & a, town_t const & b) {
     return make_pair(a.center.y, a.center.x) < make_pair(b.center.y, b.center.x);
 }
 
+vector<town_t> reconstruct_towns_from_centers(vector<Vector2> const & town_centers, int radius, Houses const & houses) {
+    vector<town_t> towns;
+    for (auto town_center : town_centers) {
+        town_t town = {};
+        town.center = town_center;
+        repeat (house_index, houses.count()) {
+            auto const & house = houses[house_index];
+            if (house.pos().dist(town.center) <= radius) {
+                town.house_indices.push_back(house_index);
+            }
+        }
+#ifdef DEBUG
+fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
+for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
+fprintf(stderr, "\n");
+#endif
+        towns.push_back(town);
+    }
+    return towns;
+}
+
 /// 街を検出し列挙します。
 vector<town_t> detect_towns(Houses const & houses) {
 
@@ -206,23 +227,7 @@ fprintf(stderr, "\n");
     }
 
     // 街を復元
-    vector<town_t> towns;
-    for (auto town_center : town_centers) {
-        town_t town = {};
-        town.center = town_center;
-        repeat (house_index, houses.count()) {
-            auto const & house = houses[house_index];
-            if (house.pos().dist(town.center) <= StageParameter::TownRadius + 3) { // 3 は余裕
-                town.house_indices.push_back(house_index);
-            }
-        }
-#ifdef DEBUG
-fprintf(stderr, "town (%d, %d) : size %d : ", int(town.center.y), int(town.center.x), int(town.house_indices.size()));
-for (int house_index : town.house_indices) fprintf(stderr, "%d ", house_index);
-fprintf(stderr, "\n");
-#endif
-        towns.push_back(town);
-    }
+    vector<town_t> towns = reconstruct_towns_from_centers(town_centers, StageParameter::TownRadius + 3, houses); // 3 は余裕
 
     // 衝突してたら併合
     repeat (town_index, towns.size()) {
@@ -255,6 +260,14 @@ fprintf(stderr, "\n");
     assert (StageParameter::MinTownCount <= towns.size() and towns.size() <= StageParameter::MaxTownCount);
 #endif
     return towns;
+}
+
+vector<Vector2> get_town_centers(vector<town_t> const & towns) {
+    vector<Vector2> poss;
+    for (auto const & town : towns) {
+        poss.push_back(town.center);
+    }
+    return poss;
 }
 
 /// 2点間の移動に要するターン数を計算します。
@@ -458,6 +471,7 @@ void Answer::init(Stage const & a_stage) {
     current_stage += 1;
 #endif
 
+    towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 1.5, a_stage.houses());
     sort(whole(towns));
     do {
         Stage stage = a_stage;
