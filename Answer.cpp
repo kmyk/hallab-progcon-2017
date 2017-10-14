@@ -374,18 +374,26 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     auto const & house = stage.houses()[house_index];
                     if (target.from_house(house_index) == TargetManager::NONE) {
                         double dist = ufo.pos().dist(house.pos());
-                        bool pred = dist < nearest_house_distance;
-                        if (stage.turn() == 0 and bernoulli_distribution(0.1)(gen)) {
-                            pred = not pred or nearest_house_index == -1;
-                        }
-                        if (pred) {
+                        if (dist < nearest_house_distance) {
                             nearest_house_distance = dist;
                             nearest_house_index = house_index;
                         }
                     }
                 };
-                for (int house_index : *target_house_indices_ptr) {
-                    update(house_index);
+                if (ufo.type() == UFOType_Small and stage.turn() == 0) {
+                    vector<int> house_indices;
+                    for (int house_index : *target_house_indices_ptr) {
+                        if (target.from_house(house_index) == TargetManager::NONE) {
+                            house_indices.push_back(house_index);
+                        }
+                    }
+                    if (not house_indices.empty()) {
+                        nearest_house_index = house_indices[uniform_int_distribution<int>(0, house_indices.size() - 1)(gen)];
+                    }
+                } else {
+                    for (int house_index : *target_house_indices_ptr) {
+                        update(house_index);
+                    }
                 }
                 if (nearest_house_index == -1) {
                     repeat (house_index, house_count) {
