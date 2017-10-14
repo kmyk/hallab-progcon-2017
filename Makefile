@@ -13,3 +13,6 @@ view:
 server:
 	# npm install -g http-server
 	http-server hpc2017/viewer &
+doc:
+	doxygen
+	x-www-browser html/namespacehpc.html
