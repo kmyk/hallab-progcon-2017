@@ -31,6 +31,10 @@ template <class T> inline void setmin(T & a, T const & b) { a = min(a, b); }
 /// プロコン問題環境を表します。
 namespace hpc {
 
+/// こちらで勝手に定義した部分はここに
+namespace Solver {
+
+/// UFOと家の双方向の対応を管理します。NONE,DELIVEREDなものを除けば全単射が保証されます。
 struct TargetManager {
     TargetManager() {
         fill(whole(ufo_to_house), NONE);
@@ -87,6 +91,8 @@ struct TargetManager {
     }
 };
 
+}
+
 //------------------------------------------------------------------------------
 /// Answer クラスのコンストラクタです。
 ///
@@ -101,10 +107,16 @@ Answer::Answer() {
 Answer::~Answer() {
 }
 
+namespace Solver {
+
+/// 2点間の移動に要するターン数を計算します。
+///
+/// @note 改善余地あり。半径とかをまったく考慮していない。
 int turns_to_move(Vector2 const & from, Vector2 const & to, int max_speed) {
     return ceil(from.dist(to) / max_speed);
 }
 
+/// ビームサーチにおける状態。
 struct beam_state_t {
     bitset<Parameter::MaxHouseCount> delivered;
     int house;
@@ -113,6 +125,10 @@ struct beam_state_t {
 };
 bool operator < (beam_state_t const & s, beam_state_t const & t) { return s.turn < t.turn; }  // weak
 bool operator > (beam_state_t const & s, beam_state_t const & t) { return s.turn > t.turn; }
+
+/// ビームサーチでUFOの軌道を構成します。
+///
+/// @param[in] turn_limit 打ち切りターン数
 beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> const & delivered, UFO const & ufo, int turn_limit) {
     vector<beam_state_t> beam; {
         beam_state_t initial = {};
@@ -154,6 +170,7 @@ beam_state_t beamsearch(Stage const & stage, bitset<Parameter::MaxHouseCount> co
     return beam.front();
 }
 
+/// ビームサーチで事前構築された移動計画に沿って、いい感じにActionsを構成します。
 void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, TargetManager & target, vector<vector<int> > const & large_path, bitset<Parameter::MaxHouseCount> const & delivered_by_large) {
     int house_count = stage.houses().count();
     array<int, Parameter::UFOCount> item_count;
@@ -161,10 +178,12 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
         auto const & ufo = stage.ufos()[ufo_index];
         item_count[ufo_index] = ufo.itemCount();
 
+        // 農場に接触しているなら自明に補給すべき
         if (item_count[ufo_index] < ufo.capacity() and Util::IsIntersect(ufo, stage.office())) {
             actions.add(Action::PickUp(ufo_index));
             item_count[ufo_index] = ufo.capacity();
         }
+        // 大きいUFOに接触しているならたいてい補給した方がよい
         if (item_count[ufo_index] < ufo.capacity() and ufo.type() == UFOType_Small) {
             repeat (large_ufo_index, Parameter::LargeUFOCount) {
                 auto const & large_ufo = stage.ufos()[large_ufo_index];
@@ -177,12 +196,14 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
             }
         }
 
+        // アイテムないならロックを手放す
         if (item_count[ufo_index] == 0) {
             if (target.is_targetting(ufo_index)) {
                 target.unlink_ufo(ufo_index);
             }
 
         } else {
+            // 目標の家に着いたら配達
             if (target.is_targetting(ufo_index)) {
                 int house_index = target.from_ufo(ufo_index);
                 auto const & house = stage.houses()[house_index];
@@ -193,6 +214,7 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
                 }
             }
 
+            // 目標がないなら、大きなUFOは(存在するなら)計画に沿って移動
             if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
                 if (ufo.type() == UFOType_Large) {
                     for (int house_index : large_path[ufo_index]) {
@@ -204,6 +226,7 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
                 }
             }
 
+            // 目標がないなら、とりあえず近い家を宣言する
             if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
                 int nearest_house_index = -1;
                 double nearest_house_distance = INFINITY;
@@ -224,6 +247,7 @@ void move_items_with_large_ufos_plan(Stage const & stage, Actions & actions, Tar
                 }
             }
 
+            // 目標がないなら、他のUFOから貪欲に奪う
             if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
                 repeat (other_ufo_index, Parameter::UFOCount) if (target.is_targetting(other_ufo_index)) {
                     auto const & other_ufo = stage.ufos()[other_ufo_index];
@@ -246,6 +270,7 @@ void move_ufos(Stage const & stage, TargetPositions & target_positions, TargetMa
     repeat (ufo_index, Parameter::UFOCount) {
         auto const & ufo = stage.ufos()[ufo_index];
 
+        // アイテムがないなら最寄りの補給可能場所へ
         if (ufo.itemCount() == 0) {
             Vector2 pos = stage.office().pos();
             if (ufo.type() == UFOType_Small) {
@@ -260,10 +285,13 @@ void move_ufos(Stage const & stage, TargetPositions & target_positions, TargetMa
             }
             target_positions.add(pos);
 
+        // 家へ向かう
         } else {
             int house_index = target.from_ufo(ufo_index);
             if (house_index != TargetManager::NONE) {
                 target_positions.add(stage.houses()[house_index].pos());
+
+            // 暇なら待機
             } else {
                 target_positions.add(ufo.pos());
             }
@@ -280,6 +308,8 @@ vector<turn_output_t> result;
 int current_stage = -1;
 #endif
 
+}
+
 //------------------------------------------------------------------------------
 /// 各ステージ開始時に呼び出されます。
 ///
@@ -287,6 +317,8 @@ int current_stage = -1;
 ///
 /// @param[in] stage 現在のステージ。
 void Answer::init(Stage const & a_stage) {
+    using namespace Solver;
+
     result.clear();
 #ifdef LOCAL
     current_stage += 1;
@@ -393,6 +425,7 @@ cerr << endl;
 /// @param[in] stage 現在のステージ。
 /// @param[out] actions この受け渡しフェーズの行動を指定する配列。
 void Answer::moveItems(Stage const & stage, Actions & actions) {
+    using namespace Solver;
     actions = result[stage.turn()].actions;
 }
 
@@ -408,6 +441,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
 /// @param[in] stage 現在のステージ。
 /// @param[out] target_positions 各UFOの目標座標を指定する配列。
 void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
+    using namespace Solver;
     target_positions = result[stage.turn()].target_positions;
 }
 
