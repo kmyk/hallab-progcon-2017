@@ -498,24 +498,24 @@ void Answer::init(Stage const & a_stage) {
     repeat (combination, towns.size() == 2 ? 1 : 3) {
         rotate(towns.begin(), towns.begin() + 1, towns.end());
         repeat (iteration, 200) {
-        Stage stage = a_stage;
-        TargetManager target = {};
+            Stage stage = a_stage;
+            TargetManager target = {};
 
-        vector<turn_output_t> outputs;
-        int current_best = -1;
-        vector<int> best_initial(Parameter::UFOCount, -1);
-        while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
-            turn_output_t output = {};
-            vector<int> initial_house = best_initial;
-            for (int modified = uniform_int_distribution<int>(2, 3)(gen); modified --; ) {
-                initial_house[uniform_int_distribution<int>(Parameter::LargeUFOCount, Parameter::UFOCount - 1)(gen)] = -1;
-            }
-            move_items_with_towns(stage, output.actions, target, towns, countryside_house_indices, initial_house);
-            stage.moveItems(output.actions);
-            move_ufos_with_towns(stage, output.target_positions, target, towns);
-            stage.moveUFOs(output.target_positions);
-            stage.advanceTurn();
-            outputs.push_back(output);
+            vector<turn_output_t> outputs;
+            int current_best = -1;
+            vector<int> best_initial(Parameter::UFOCount, -1);
+            while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
+                turn_output_t output = {};
+                vector<int> initial_house = best_initial;
+                for (int modified = uniform_int_distribution<int>(2, 3)(gen); modified --; ) {
+                    initial_house[uniform_int_distribution<int>(Parameter::LargeUFOCount, Parameter::UFOCount - 1)(gen)] = -1;
+                }
+                move_items_with_towns(stage, output.actions, target, towns, countryside_house_indices, initial_house);
+                stage.moveItems(output.actions);
+                move_ufos_with_towns(stage, output.target_positions, target, towns);
+                stage.moveUFOs(output.target_positions);
+                stage.advanceTurn();
+                outputs.push_back(output);
 
 #ifdef DEBUG
         // debug
@@ -527,37 +527,37 @@ cerr << endl;
 #endif
 
 #ifdef LOCAL
-            // check invariant
-            repeat (ufo_index, Parameter::UFOCount) {
-                int house_index = target.from_ufo(ufo_index);
-                if (house_index == TargetManager::NONE) {
-                    // nop
-                } else if (house_index == TargetManager::DELIVERED) {
-                    assert (false);
-                } else {
-                    assert (target.from_house(house_index) == ufo_index);
+                // check invariant
+                repeat (ufo_index, Parameter::UFOCount) {
+                    int house_index = target.from_ufo(ufo_index);
+                    if (house_index == TargetManager::NONE) {
+                        // nop
+                    } else if (house_index == TargetManager::DELIVERED) {
+                        assert (false);
+                    } else {
+                        assert (target.from_house(house_index) == ufo_index);
+                    }
                 }
-            }
-            repeat (house_index, stage.houses().count()) {
-                int ufo_index = target.from_house(house_index);
-                if (ufo_index == TargetManager::NONE) {
-                    // nop
-                } else if (ufo_index == TargetManager::DELIVERED) {
-                    assert (stage.houses()[house_index].delivered());
-                } else {
-                    assert (target.from_ufo(ufo_index) == house_index);
+                repeat (house_index, stage.houses().count()) {
+                    int ufo_index = target.from_house(house_index);
+                    if (ufo_index == TargetManager::NONE) {
+                        // nop
+                    } else if (ufo_index == TargetManager::DELIVERED) {
+                        assert (stage.houses()[house_index].delivered());
+                    } else {
+                        assert (target.from_ufo(ufo_index) == house_index);
+                    }
                 }
-            }
 #endif
-            if (current_best == -1 or outputs.size() <= current_best) {
-                current_best = outputs.size();
-                best_initial = initial_house;
+                if (current_best == -1 or outputs.size() <= current_best) {
+                    current_best = outputs.size();
+                    best_initial = initial_house;
+                }
             }
-        }
 
-        if (result.empty() or outputs.size() < result.size()) {
-            result = outputs;
-        }
+            if (result.empty() or outputs.size() < result.size()) {
+                result = outputs;
+            }
         }
     }
 
