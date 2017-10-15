@@ -111,6 +111,8 @@ Answer::~Answer() {
 
 namespace Solver {
 
+constexpr float eps = 1e-4;
+
 minstd_rand gen;
 
 /// 座標がstage上にあるかを判定します。
@@ -279,6 +281,104 @@ vector<Vector2> get_town_centers(vector<town_t> const & towns) {
 int turns_to_move(Vector2 const & from, Vector2 const & to, int max_speed) {
     return ceil(from.dist(to) / max_speed);
 }
+pair<int, Vector2> simulate_move(Vector2 const & from, Vector2 const & to, int sum_radius, int max_speed) {
+    Vector2 pos = from;
+    int turn = 0;
+    for (; ; ++ turn) {
+        Vector2 dir = to - pos;
+        float length = dir.length();
+        if (length < sum_radius - eps) {  // 保守的のためeps
+            break;
+        }
+        if (length > max_speed) {
+            dir.unitAssign(max_speed - eps);
+        }
+        pos = pos + dir;
+    }
+    return { turn, pos };
+}
+
+/// 配達計画から実際の経路や補給を構成する
+pair<vector<Vector2>, vector<pair<int, Action> > > get_delivering_path(vector<int> const & delivering_plan, Stage const & stage, int ufo_index, vector<vector<Vector2> > const & large_ufo_path) {
+    auto const & ufo = stage.ufos()[ufo_index];
+    vector<Vector2> positions;
+    vector<pair<int, Action> > actions;
+    Vector2 pos = stage.office().pos();
+    auto move_to = [&](Vector2 const & target_pos, int target_radius) {
+        while (true) {
+            Vector2 dir = target_pos - pos;
+            float length = dir.length();
+            if (length < ufo.radius() + target_radius - eps) break;
+            if (length > ufo.maxSpeed()) dir.unitAssign(ufo.maxSpeed() - eps);
+            pos = pos + dir;
+            positions.push_back(pos);
+        }
+    };
+    // 大きいUFOの位置を取得
+    auto get_large_ufo_pos = [&](int large_ufo_index, int turn) {
+        // NOTE: (他を実装するとき)ここで配列外だった場合に注意する
+        if (large_ufo_path.size() <= large_ufo_index) return stage.office().pos();
+        auto const & large_path = large_ufo_path[large_ufo_index];
+        return
+            large_path.empty() or turn <= 0 ? stage.office().pos() :
+            large_path.size() <= turn - 1 ? large_path.back() :
+            large_path[turn - 1];
+    };
+    auto chase_large_ufo = [&](int large_ufo_index) {
+        while (true) {
+            Vector2 dir = get_large_ufo_pos(large_ufo_index, positions.size()) - pos;
+            float length = dir.length();
+            if (length < ufo.radius() + Parameter::LargeUFORadius - eps) break;
+            if (length > ufo.maxSpeed()) dir.unitAssign(ufo.maxSpeed() - eps);
+            pos = pos + dir;
+            positions.push_back(pos);
+        }
+    };
+
+    // 初手で積み込みは確定
+    actions.emplace_back(0, Action::PickUp(ufo_index));
+    int item_count = ufo.capacity();
+    // 前から見ていく
+    for (int house_index : delivering_plan) {
+        auto const & house = stage.houses()[house_index];
+
+        // 補充が必要な場合
+        if (item_count == 0) {
+            int target_index = -1;
+            if (ufo.type() == UFOType_Small) {
+                int required_turn = turns_to_move(pos, stage.office().pos(), Parameter::SmallUFOMaxSpeed) + turns_to_move(stage.office().pos(), house.pos(), Parameter::SmallUFOMaxSpeed);
+                repeat (large_ufo_index, Parameter::LargeUFOCount) {
+                    // 移動先の予測
+                    Vector2 large_pos = get_large_ufo_pos(large_ufo_index, positions.size());
+                    int large_turn = turns_to_move(pos, large_pos, Parameter::SmallUFOMaxSpeed) + turns_to_move(large_pos, house.pos(), Parameter::SmallUFOMaxSpeed);
+                    if (large_turn < required_turn) {
+                        target_index = large_ufo_index;
+                    }
+                }
+            }
+            if (target_index == -1) {
+                move_to(stage.office().pos(), Parameter::OfficeRadius);
+                actions.emplace_back(positions.size(), Action::PickUp(ufo_index));
+            } else {
+                chase_large_ufo(target_index);
+                actions.emplace_back(positions.size(), Action::Pass(target_index, ufo_index));
+            }
+            item_count = ufo.capacity();
+        }
+
+        // 配りに行く
+        move_to(house.pos(), Parameter::HouseRadius);
+        actions.emplace_back(positions.size(), Action::Deliver(ufo_index, house_index));
+        item_count -= 1;
+    }
+    if (not actions.empty()) {
+        while (positions.size() <= actions.back().first) {
+            positions.push_back(pos);
+        }
+    }
+    assert (not positions.empty());
+    return { positions, actions };
+}
 
 /// 街に所属しない家の一覧を取得
 vector<int> get_countryside_house_indices(int house_count, vector<town_t> const & towns) {
@@ -291,177 +391,6 @@ vector<int> get_countryside_house_indices(int house_count, vector<town_t> const 
     }
     xs.erase(remove(whole(xs), -1), xs.end());
     return xs;
-}
-
-void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns) {
-    int house_count = stage.houses().count();
-    vector<int> countryside_house_indices = get_countryside_house_indices(house_count, towns);
-    array<int, Parameter::UFOCount> item_count;
-
-    repeat (ufo_index, Parameter::UFOCount) {
-        auto const & ufo = stage.ufos()[ufo_index];
-        item_count[ufo_index] = ufo.itemCount();
-
-        // 農場に接触しているなら自明に補給すべき
-        if (item_count[ufo_index] < ufo.capacity() and Util::IsIntersect(ufo, stage.office())) {
-            actions.add(Action::PickUp(ufo_index));
-            item_count[ufo_index] = ufo.capacity();
-        }
-
-        // 大きいUFOに接触しているなら補給
-        // 街の大きさは20とかなので全部ひとつでまかなえる
-        if (item_count[ufo_index] < ufo.capacity() and ufo.type() == UFOType_Small) {
-            repeat (large_ufo_index, Parameter::LargeUFOCount) {
-                auto const & large_ufo = stage.ufos()[large_ufo_index];
-                if (Util::IsIntersect(ufo, large_ufo)) {
-                    actions.add(Action::Pass(large_ufo_index, ufo_index));
-                    int delta = min(item_count[large_ufo_index], ufo.capacity() - item_count[ufo_index]);
-                    item_count[ufo_index] += delta;
-                    item_count[large_ufo_index] -= delta;
-                }
-            }
-        }
-
-        // アイテムないならロックを手放す
-        if (item_count[ufo_index] == 0) {
-            if (target.is_targetting(ufo_index)) {
-                target.unlink_ufo(ufo_index);
-            }
-
-        } else {
-            // 目標の家に着いたら配達
-            if (target.is_targetting(ufo_index)) {
-                int house_index = target.from_ufo(ufo_index);
-                auto const & house = stage.houses()[house_index];
-                if (Util::IsIntersect(ufo, house)) {
-                    item_count[ufo_index] -= 1;
-                    actions.add(Action::Deliver(ufo_index, house_index));
-                    target.deliver_house(house_index);
-                }
-            }
-
-            // 目標がないなら、家を宣言
-            if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
-                // 担当範囲を選択 大きいUFOへの同伴か否か
-                int target_index = -1;
-                if (ufo.type() == UFOType_Large) {
-                    if (ufo_index < towns.size()) {
-                        target_index = ufo_index;
-                    }
-                } else {
-                    int i = ufo_index - Parameter::LargeUFOCount;
-                    switch (towns.size()) {
-                        case 1: if (i < 4) target_index = 0; break;
-                        case 2: if (i < 4) target_index = i / 2; break;
-                        case 3: if (i < 2) { target_index = i; } else if (i < uniform_int_distribution<int>(5, 7)(gen)) { target_index = 2; } break;
-                        case 4:
-                        case 5: if (i < 2) target_index = i; break;
-                        default: break;
-                    }
-                }
-                vector<int> const *target_house_indices_ptr;
-                if (target_index == -1) {
-                    target_house_indices_ptr = &countryside_house_indices;
-                } else {
-                    target_house_indices_ptr = &towns[target_index].house_indices;
-                }
-
-                // 一番近いものを選択
-                int nearest_house_index = -1;
-                double nearest_house_distance = INFINITY;
-                auto update = [&](int house_index) {
-                    if (target.is_delivered(house_index)) return;
-                    auto const & house = stage.houses()[house_index];
-                    if (target.from_house(house_index) == TargetManager::NONE) {
-                        double dist = ufo.pos().dist(house.pos());
-                        if (ufo.type() == UFOType_Small) {
-                            repeat (large_ufo_index, Parameter::LargeUFOCount) {
-                                auto const & large_ufo = stage.ufos()[large_ufo_index];
-                                double large_dist = house.pos().dist(large_ufo.pos());
-                                dist += max(0.0, 100 - large_dist);
-                            }
-                        }
-                        if (dist < nearest_house_distance) {
-                            nearest_house_distance = dist;
-                            nearest_house_index = house_index;
-                        }
-                    }
-                };
-                if (ufo.type() == UFOType_Small and stage.turn() == 0) {
-                    vector<int> house_indices;
-                    for (int house_index : *target_house_indices_ptr) {
-                        if (target.from_house(house_index) == TargetManager::NONE) {
-                            house_indices.push_back(house_index);
-                        }
-                    }
-                    if (not house_indices.empty()) {
-                        nearest_house_index = house_indices[uniform_int_distribution<int>(0, house_indices.size() - 1)(gen)];
-                    }
-                } else {
-                    for (int house_index : *target_house_indices_ptr) {
-                        update(house_index);
-                    }
-                }
-                if (nearest_house_index == -1) {
-                    repeat (house_index, house_count) {
-                        update(house_index);  // 担当範囲が空なら他のをやる
-                    }
-                }
-                if (nearest_house_index != -1) {
-                    target.link(ufo_index, nearest_house_index);
-                }
-            }
-
-            // 目標がないなら、他のUFOから貪欲に奪う
-            if (item_count[ufo_index] and not target.is_targetting(ufo_index)) {
-                repeat (other_ufo_index, Parameter::UFOCount) if (target.is_targetting(other_ufo_index)) {
-                    auto const & other_ufo = stage.ufos()[other_ufo_index];
-                    int house_index = target.from_ufo(other_ufo_index);
-                    auto const & house = stage.houses()[house_index];
-                    double this_time = ufo.pos().dist(house.pos()) / ufo.maxSpeed();
-                    double other_time = other_ufo.pos().dist(house.pos()) / other_ufo.maxSpeed();
-                    if (this_time < other_time) {
-                        target.unlink_ufo(other_ufo_index);
-                        target.link(ufo_index, house_index);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-void move_ufos_with_towns(Stage const & stage, TargetPositions & target_positions, TargetManager & target, vector<town_t> const & towns) {
-    repeat (ufo_index, Parameter::UFOCount) {
-        auto const & ufo = stage.ufos()[ufo_index];
-
-        // アイテムがないなら最寄りの補給可能場所へ
-        if (ufo.itemCount() == 0) {
-            Vector2 pos = stage.office().pos();
-            if (ufo.type() == UFOType_Small) {
-                repeat (large_ufo_index, Parameter::LargeUFOCount) {
-                    auto const & large_ufo = stage.ufos()[large_ufo_index];
-                    if (large_ufo.itemCount() >= 5) {
-                        if (ufo.pos().dist(large_ufo.pos()) < ufo.pos().dist(pos)) {
-                            pos = large_ufo.pos();  // NOTE: The prediction is required.
-                        }
-                    }
-                }
-            }
-            target_positions.add(pos);
-
-        } else {
-            // 家へ向かう
-            int house_index = target.from_ufo(ufo_index);
-            if (house_index != TargetManager::NONE) {
-                target_positions.add(stage.houses()[house_index].pos());
-
-            // 暇なら待機
-            } else {
-                target_positions.add(ufo.pos());
-            }
-        }
-    }
 }
 
 struct turn_output_t {
@@ -492,60 +421,36 @@ void Answer::init(Stage const & a_stage) {
 
     towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 2, a_stage.houses());
     sort(whole(towns));
-    do {
-        repeat (iteration, 100) {
-        Stage stage = a_stage;
-        TargetManager target = {};
 
-        vector<turn_output_t> outputs;
-        while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
-            turn_output_t output = {};
-            move_items_with_towns(stage, output.actions, target, towns);
-            stage.moveItems(output.actions);
-            move_ufos_with_towns(stage, output.target_positions, target, towns);
-            stage.moveUFOs(output.target_positions);
-            stage.advanceTurn();
-            outputs.push_back(output);
-
-#ifdef DEBUG
-        // debug
-cerr << "turn " << stage.turn() << ": ";
-repeat (house_index, stage.houses().count()) cerr << stage.houses()[house_index].delivered();
-cerr << " / ";
-repeat (ufo_index, Parameter::UFOCount) cerr << target.from_ufo(ufo_index) << "(" << stage.ufos()[ufo_index].itemCount() << ") ";
-cerr << endl;
-#endif
-
-#ifdef LOCAL
-            // check invariant
-            repeat (ufo_index, Parameter::UFOCount) {
-                int house_index = target.from_ufo(ufo_index);
-                if (house_index == TargetManager::NONE) {
-                    // nop
-                } else if (house_index == TargetManager::DELIVERED) {
-                    assert (false);
-                } else {
-                    assert (target.from_house(house_index) == ufo_index);
-                }
-            }
-            repeat (house_index, stage.houses().count()) {
-                int ufo_index = target.from_house(house_index);
-                if (ufo_index == TargetManager::NONE) {
-                    // nop
-                } else if (ufo_index == TargetManager::DELIVERED) {
-                    assert (stage.houses()[house_index].delivered());
-                } else {
-                    assert (target.from_ufo(ufo_index) == house_index);
-                }
-            }
-#endif
+    vector<vector<int> > delivering_plan(Parameter::UFOCount);
+    repeat (house_index, a_stage.houses().count()) {
+        delivering_plan[house_index % Parameter::UFOCount].push_back(house_index);
+    }
+    vector<vector<Vector2> > positions_list;
+    vector<vector<pair<int, Action> > > actions_list;
+    repeat (ufo_index, Parameter::UFOCount) {
+        vector<Vector2> positions;
+        vector<pair<int, Action> > actions;
+        tie(positions, actions) = get_delivering_path(delivering_plan[ufo_index], a_stage, ufo_index, positions_list);
+        positions_list.push_back(positions);
+        actions_list.push_back(actions);
+    }
+    int result_turn = 0;
+    repeat (ufo_index, Parameter::UFOCount) {
+        setmax(result_turn, int(positions_list[ufo_index].size()));
+    }
+    result.resize(result_turn);
+    repeat (ufo_index, Parameter::UFOCount) {
+        for (auto it : actions_list[ufo_index]) {
+            result[it.first].actions.add(it.second);
         }
-
-        if (result.empty() or outputs.size() < result.size()) {
-            result = outputs;
+        repeat (turn, result_turn) {
+            result[turn].target_positions.add(
+                turn < positions_list[ufo_index].size()
+                ? positions_list[ufo_index][turn]
+                : result[turn - 1].target_positions[ufo_index]);
         }
-        }
-    } while (next_permutation(whole(towns)));
+    }
 
 #ifdef LOCAL
     const char *green = "\x1b[32m";
@@ -580,7 +485,25 @@ cerr << endl;
 /// @param[out] actions この受け渡しフェーズの行動を指定する配列。
 void Answer::moveItems(Stage const & stage, Actions & actions) {
     using namespace Solver;
+// if (stage.turn() >= result.size()) return;
+    assert (stage.turn() < result.size());
     actions = result[stage.turn()].actions;
+    for (auto action : actions) {
+        switch (action.type()) {
+            case ActionType_PickUp:
+                assert (Util::IsIntersect(stage.ufos()[action.ufoIndex()], stage.office()));
+                break;
+            case ActionType_Pass:
+                assert (stage.ufos()[action.srcUFOIndex()].itemCount() >= stage.ufos()[action.dstUFOIndex()].capacity());
+                assert (Util::IsIntersect(stage.ufos()[action.srcUFOIndex()], stage.ufos()[action.dstUFOIndex()]));
+                break;
+            case ActionType_Deliver:
+                assert (Util::IsIntersect(stage.ufos()[action.ufoIndex()], stage.houses()[action.houseIndex()]));
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -596,7 +519,17 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
 /// @param[out] target_positions 各UFOの目標座標を指定する配列。
 void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
     using namespace Solver;
+// if (stage.turn() >= result.size()) { target_positions = result.back().target_positions; return; }
     target_positions = result[stage.turn()].target_positions;
+    if (stage.turn() >= 1) {
+        repeat (ufo_index, Parameter::UFOCount) {
+            assert (stage.ufos()[ufo_index].pos().dist(result[stage.turn() - 1].target_positions[ufo_index]) < eps);
+        }
+    }
+#ifdef DEBUG
+repeat (house_index, stage.houses().count()) cerr << stage.houses()[house_index].delivered();
+cerr << endl;
+#endif
 }
 
 //------------------------------------------------------------------------------
