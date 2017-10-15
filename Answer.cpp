@@ -293,9 +293,8 @@ vector<int> get_countryside_house_indices(int house_count, vector<town_t> const 
     return xs;
 }
 
-void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns) {
+void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns, vector<int> const & countryside_house_indices) {
     int house_count = stage.houses().count();
-    vector<int> countryside_house_indices = get_countryside_house_indices(house_count, towns);
     array<int, Parameter::UFOCount> item_count;
 
     repeat (ufo_index, Parameter::UFOCount) {
@@ -490,6 +489,8 @@ void Answer::init(Stage const & a_stage) {
     current_stage += 1;
 #endif
 
+    towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 1.2, a_stage.houses());
+    vector<int> countryside_house_indices = get_countryside_house_indices(a_stage.houses().count(), towns);
     towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 2, a_stage.houses());
     sort(whole(towns));
     do {
@@ -500,7 +501,7 @@ void Answer::init(Stage const & a_stage) {
         vector<turn_output_t> outputs;
         while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
             turn_output_t output = {};
-            move_items_with_towns(stage, output.actions, target, towns);
+            move_items_with_towns(stage, output.actions, target, towns, countryside_house_indices);
             stage.moveItems(output.actions);
             move_ufos_with_towns(stage, output.target_positions, target, towns);
             stage.moveUFOs(output.target_positions);
