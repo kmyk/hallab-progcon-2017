@@ -293,7 +293,7 @@ vector<int> get_countryside_house_indices(int house_count, vector<town_t> const 
     return xs;
 }
 
-void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns, vector<int> const & countryside_house_indices) {
+void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager & target, vector<town_t> const & towns, vector<int> const & countryside_house_indices, vector<int> & initial_house) {
     int house_count = stage.houses().count();
     array<int, Parameter::UFOCount> item_count;
 
@@ -352,7 +352,7 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     switch (towns.size()) {
                         case 1: if (i < 4) target_index = 0; break;
                         case 2: if (i < 4) target_index = i / 2; break;
-                        case 3: if (i < 2) { target_index = i; } else if (i < uniform_int_distribution<int>(5, 7)(gen)) { target_index = 2; } break;
+                        case 3: if (i < 2) { target_index = i; } else if (i < 6) { target_index = 2; } break;
                         case 4:
                         case 5: if (i < 2) target_index = i; break;
                         default: break;
@@ -394,7 +394,10 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                         }
                     }
                     if (not house_indices.empty()) {
-                        nearest_house_index = house_indices[uniform_int_distribution<int>(0, house_indices.size() - 1)(gen)];
+                        if (initial_house[ufo_index] == -1) {
+                            initial_house[ufo_index] = uniform_int_distribution<int>(0, house_indices.size() - 1)(gen);
+                        }
+                        nearest_house_index = house_indices[initial_house[ufo_index]];
                     }
                 } else {
                     for (int house_index : *target_house_indices_ptr) {
@@ -499,9 +502,15 @@ void Answer::init(Stage const & a_stage) {
         TargetManager target = {};
 
         vector<turn_output_t> outputs;
+        int current_best = -1;
+        vector<int> best_initial(Parameter::UFOCount, -1);
         while (not stage.hasFinished() and stage.turn() < Parameter::GameTurnLimit) {
             turn_output_t output = {};
-            move_items_with_towns(stage, output.actions, target, towns, countryside_house_indices);
+            vector<int> initial_house = best_initial;
+            for (int modified = uniform_int_distribution<int>(2, 3)(gen); modified --; ) {
+                initial_house[uniform_int_distribution<int>(Parameter::LargeUFOCount, Parameter::UFOCount - 1)(gen)] = -1;
+            }
+            move_items_with_towns(stage, output.actions, target, towns, countryside_house_indices, initial_house);
             stage.moveItems(output.actions);
             move_ufos_with_towns(stage, output.target_positions, target, towns);
             stage.moveUFOs(output.target_positions);
@@ -540,6 +549,10 @@ cerr << endl;
                 }
             }
 #endif
+            if (current_best == -1 or outputs.size() <= current_best) {
+                current_best = outputs.size();
+                best_initial = initial_house;
+            }
         }
 
         if (result.empty() or outputs.size() < result.size()) {
