@@ -281,43 +281,72 @@ vector<Vector2> get_town_centers(vector<town_t> const & towns) {
 int turns_to_move(Vector2 const & from, Vector2 const & to, int max_speed) {
     return ceil(from.dist(to) / max_speed);
 }
-pair<int, Vector2> simulate_move(Vector2 const & from, Vector2 const & to, int sum_radius, int max_speed) {
-    Vector2 pos = from;
-    int turn = 0;
-    for (; ; ++ turn) {
-        Vector2 dir = to - pos;
+template <typename F, typename G>
+void simulate_move(Vector2 pos, int sum_radius, int max_speed, F target_pos, G callback) {
+    for (int turn = 0; ; ++ turn) {
+        Vector2 dir = target_pos() - pos;
         float length = dir.length();
-        if (length < sum_radius - eps) {  // 保守的のためeps
-            break;
-        }
-        if (length > max_speed) {
-            dir.unitAssign(max_speed - eps);
-        }
+        if (length < sum_radius - eps) break;  // 保守的のためeps
+        if (length > max_speed) dir.unitAssign(max_speed - eps);
         pos = pos + dir;
+        callback(turn, pos);
     }
-    return { turn, pos };
+}
+
+/// 貪欲に近いやつを取る
+pair<vector<Vector2>, vector<pair<int, Action> > > greedy_large_ufo_on_town(vector<int> const & house_indices, Stage const & stage, int ufo_index, int turn_limit) {
+    auto const & ufo = stage.ufos()[ufo_index];
+    vector<Vector2> positions;
+    vector<pair<int, Action> > actions;
+    Vector2 pos = stage.office().pos();
+    auto move_to = [&](Vector2 const & target_pos) {
+        simulate_move(pos, ufo.radius() + Parameter::HouseRadius, ufo.maxSpeed(), [&]() {
+            return target_pos;
+        }, [&](int delta, Vector2 a_pos) {
+            positions.push_back(a_pos);
+        });
+        pos = positions.back();
+    };
+    // 初手で積み込みは確定
+    actions.emplace_back(0, Action::PickUp(ufo_index));
+    // 貪欲
+    vector<char> used(Parameter::MaxHouseCount);
+    while (positions.size() < turn_limit) {
+        int nearest_house_index = -1;
+        float nearest_dist = INFINITY;
+        for (int house_index : house_indices) if (not used[house_index]) {
+            auto const & house = stage.houses()[house_index];
+            float dist = pos.dist(house.pos());
+            if (dist < nearest_dist) {
+                nearest_dist = dist;
+                nearest_house_index = house_index;
+            }
+        }
+        if (nearest_house_index == -1) break;
+        move_to(stage.houses()[nearest_house_index].pos());
+        actions.emplace_back(positions.size(), Action::Deliver(ufo_index, nearest_house_index));
+        used[nearest_house_index] = true;
+    }
+    return { positions, actions };
 }
 
 /// 配達計画から実際の経路や補給を構成する
-pair<vector<Vector2>, vector<pair<int, Action> > > get_delivering_path(vector<int> const & delivering_plan, Stage const & stage, int ufo_index, vector<vector<Vector2> > const & large_ufo_path) {
+pair<vector<Vector2>, vector<pair<int, Action> > > get_delivering_path(vector<int> const & delivering_plan, Stage const & stage, int ufo_index, array<vector<Vector2>, Parameter::UFOCount> const & large_ufo_path) {
     auto const & ufo = stage.ufos()[ufo_index];
     vector<Vector2> positions;
     vector<pair<int, Action> > actions;
     Vector2 pos = stage.office().pos();
     auto move_to = [&](Vector2 const & target_pos, int target_radius) {
-        while (true) {
-            Vector2 dir = target_pos - pos;
-            float length = dir.length();
-            if (length < ufo.radius() + target_radius - eps) break;
-            if (length > ufo.maxSpeed()) dir.unitAssign(ufo.maxSpeed() - eps);
-            pos = pos + dir;
-            positions.push_back(pos);
-        }
+        simulate_move(pos, ufo.radius() + target_radius, ufo.maxSpeed(), [&]() {
+            return target_pos;
+        }, [&](int delta, Vector2 a_pos) {
+            positions.push_back(a_pos);
+        });
+        pos = positions.back();
     };
     // 大きいUFOの位置を取得
     auto get_large_ufo_pos = [&](int large_ufo_index, int turn) {
         // NOTE: (他を実装するとき)ここで配列外だった場合に注意する
-        if (large_ufo_path.size() <= large_ufo_index) return stage.office().pos();
         auto const & large_path = large_ufo_path[large_ufo_index];
         return
             large_path.empty() or turn <= 0 ? stage.office().pos() :
@@ -325,14 +354,12 @@ pair<vector<Vector2>, vector<pair<int, Action> > > get_delivering_path(vector<in
             large_path[turn - 1];
     };
     auto chase_large_ufo = [&](int large_ufo_index) {
-        while (true) {
-            Vector2 dir = get_large_ufo_pos(large_ufo_index, positions.size()) - pos;
-            float length = dir.length();
-            if (length < ufo.radius() + Parameter::LargeUFORadius - eps) break;
-            if (length > ufo.maxSpeed()) dir.unitAssign(ufo.maxSpeed() - eps);
-            pos = pos + dir;
-            positions.push_back(pos);
-        }
+        simulate_move(pos, ufo.radius() + Parameter::LargeUFORadius, ufo.maxSpeed(), [&]() {
+            return get_large_ufo_pos(large_ufo_index, positions.size());
+        }, [&](int delta, Vector2 a_pos) {
+            positions.push_back(a_pos);
+        });
+        pos = positions.back();
     };
 
     // 初手で積み込みは確定
@@ -350,7 +377,8 @@ pair<vector<Vector2>, vector<pair<int, Action> > > get_delivering_path(vector<in
                 repeat (large_ufo_index, Parameter::LargeUFOCount) {
                     // 移動先の予測
                     Vector2 large_pos = get_large_ufo_pos(large_ufo_index, positions.size());
-                    int large_turn = turns_to_move(pos, large_pos, Parameter::SmallUFOMaxSpeed) + turns_to_move(large_pos, house.pos(), Parameter::SmallUFOMaxSpeed);
+                    constexpr int weight = 10;
+                    int large_turn = turns_to_move(pos, large_pos, Parameter::SmallUFOMaxSpeed) + turns_to_move(large_pos, house.pos(), Parameter::SmallUFOMaxSpeed) + weight;
                     if (large_turn < required_turn) {
                         target_index = large_ufo_index;
                     }
@@ -423,31 +451,68 @@ void Answer::init(Stage const & a_stage) {
     sort(whole(towns));
 
     vector<vector<int> > delivering_plan(Parameter::UFOCount);
-    repeat (house_index, a_stage.houses().count()) {
-        delivering_plan[house_index % Parameter::UFOCount].push_back(house_index);
+    array<vector<Vector2>, Parameter::UFOCount> positions;
+    array<vector<pair<int, Action> >, Parameter::UFOCount> actions;
+    array<int, Parameter::UFOCount> turns = {};
+    array<bool, Parameter::MaxHouseCount> used = {};
+    repeat (large_ufo_index, Parameter::LargeUFOCount) {
+        tie(positions[large_ufo_index], actions[large_ufo_index]) = greedy_large_ufo_on_town(towns[large_ufo_index].house_indices, a_stage, large_ufo_index, 70);
+        turns[large_ufo_index] = positions[large_ufo_index].size();
+        for (auto it : actions[large_ufo_index]) {
+            if (it.second.type() == ActionType_Deliver) {
+                delivering_plan[large_ufo_index].push_back(it.second.houseIndex());
+                used[it.second.houseIndex()] = true;
+            }
+        }
     }
-    vector<vector<Vector2> > positions_list;
-    vector<vector<pair<int, Action> > > actions_list;
-    repeat (ufo_index, Parameter::UFOCount) {
-        vector<Vector2> positions;
-        vector<pair<int, Action> > actions;
-        tie(positions, actions) = get_delivering_path(delivering_plan[ufo_index], a_stage, ufo_index, positions_list);
-        positions_list.push_back(positions);
-        actions_list.push_back(actions);
+    repeat (house_index, a_stage.houses().count()) if (not used[house_index]) {
+        delivering_plan[Parameter::LargeUFOCount + house_index % Parameter::SmallUFOCount].push_back(house_index);
     }
-    int result_turn = 0;
-    repeat (ufo_index, Parameter::UFOCount) {
-        setmax(result_turn, int(positions_list[ufo_index].size()));
+    repeat_from (ufo_index, Parameter::LargeUFOCount, Parameter::UFOCount) {
+        tie(positions[ufo_index], actions[ufo_index]) = get_delivering_path(delivering_plan[ufo_index], a_stage, ufo_index, positions);
+        turns[ufo_index] = positions[ufo_index].size();
     }
+    repeat (iteration, 40000) {
+        // int small_ufo_index = max_element(turns.begin() + Parameter::LargeUFOCount, turns.end()) - turns.begin();
+        int small_ufo_index = uniform_int_distribution<int>(Parameter::LargeUFOCount, Parameter::UFOCount - 1)(gen);
+        int other_ufo_index;
+        do {
+            other_ufo_index = uniform_int_distribution<int>(Parameter::LargeUFOCount, Parameter::UFOCount - 1)(gen);
+        } while (other_ufo_index == small_ufo_index);
+        vector<int> plan1 = delivering_plan[small_ufo_index];
+        vector<int> plan2 = delivering_plan[other_ufo_index];
+        int i = uniform_int_distribution<int>(0, plan1.size() - 1)(gen);
+        int j = uniform_int_distribution<int>(0, plan2.size())(gen);
+        plan2.insert(plan2.begin() + j, plan1[i]);
+        plan1.erase(plan1.begin() + i);
+        vector<Vector2> positions1, positions2;
+        vector<pair<int, Action> > actions1, actions2;
+        tie(positions1, actions1) = get_delivering_path(plan1, a_stage, small_ufo_index, positions);
+        tie(positions2, actions2) = get_delivering_path(plan2, a_stage, other_ufo_index, positions);
+        if (max(positions1.size(), positions2.size()) <= max(turns[small_ufo_index], turns[other_ufo_index])) {
+            turns[small_ufo_index] = positions1.size();
+            turns[other_ufo_index] = positions2.size();
+            delivering_plan[small_ufo_index].swap(plan1);
+            delivering_plan[other_ufo_index].swap(plan2);
+            actions[small_ufo_index].swap(actions1);
+            actions[other_ufo_index].swap(actions2);
+            positions[small_ufo_index].swap(positions1);
+            positions[other_ufo_index].swap(positions2);
+        }
+    }
+    int result_turn = *max_element(whole(turns)) + 1;
     result.resize(result_turn);
     repeat (ufo_index, Parameter::UFOCount) {
-        for (auto it : actions_list[ufo_index]) {
+cerr << delivering_plan[ufo_index].size() << " : ";
+for (int house_index : delivering_plan[ufo_index]) cerr << house_index << ' ';
+cerr << endl;
+        for (auto it : actions[ufo_index]) {
             result[it.first].actions.add(it.second);
         }
         repeat (turn, result_turn) {
             result[turn].target_positions.add(
-                turn < positions_list[ufo_index].size()
-                ? positions_list[ufo_index][turn]
+                turn < positions[ufo_index].size()
+                ? positions[ufo_index][turn]
                 : result[turn - 1].target_positions[ufo_index]);
         }
     }
@@ -485,7 +550,7 @@ void Answer::init(Stage const & a_stage) {
 /// @param[out] actions この受け渡しフェーズの行動を指定する配列。
 void Answer::moveItems(Stage const & stage, Actions & actions) {
     using namespace Solver;
-// if (stage.turn() >= result.size()) return;
+if (stage.turn() >= result.size()) return;
     assert (stage.turn() < result.size());
     actions = result[stage.turn()].actions;
     for (auto action : actions) {
@@ -498,6 +563,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
                 assert (Util::IsIntersect(stage.ufos()[action.srcUFOIndex()], stage.ufos()[action.dstUFOIndex()]));
                 break;
             case ActionType_Deliver:
+                assert (stage.ufos()[action.ufoIndex()].itemCount() >= 1);
                 assert (Util::IsIntersect(stage.ufos()[action.ufoIndex()], stage.houses()[action.houseIndex()]));
                 break;
             default:
@@ -519,7 +585,7 @@ void Answer::moveItems(Stage const & stage, Actions & actions) {
 /// @param[out] target_positions 各UFOの目標座標を指定する配列。
 void Answer::moveUFOs(Stage const & stage, TargetPositions & target_positions) {
     using namespace Solver;
-// if (stage.turn() >= result.size()) { target_positions = result.back().target_positions; return; }
+if (stage.turn() >= result.size()) { target_positions = result.back().target_positions; return; }
     target_positions = result[stage.turn()].target_positions;
     if (stage.turn() >= 1) {
         repeat (ufo_index, Parameter::UFOCount) {
