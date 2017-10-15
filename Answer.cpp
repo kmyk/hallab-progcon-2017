@@ -374,6 +374,13 @@ void move_items_with_towns(Stage const & stage, Actions & actions, TargetManager
                     auto const & house = stage.houses()[house_index];
                     if (target.from_house(house_index) == TargetManager::NONE) {
                         double dist = ufo.pos().dist(house.pos());
+                        if (ufo.type() == UFOType_Small) {
+                            repeat (large_ufo_index, Parameter::LargeUFOCount) {
+                                auto const & large_ufo = stage.ufos()[large_ufo_index];
+                                double large_dist = house.pos().dist(large_ufo.pos());
+                                dist += max(0.0, 100 - large_dist);
+                            }
+                        }
                         if (dist < nearest_house_distance) {
                             nearest_house_distance = dist;
                             nearest_house_index = house_index;
