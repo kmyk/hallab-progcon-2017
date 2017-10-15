@@ -495,9 +495,9 @@ void Answer::init(Stage const & a_stage) {
     towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 1.2, a_stage.houses());
     vector<int> countryside_house_indices = get_countryside_house_indices(a_stage.houses().count(), towns);
     towns = reconstruct_towns_from_centers(get_town_centers(towns), StageParameter::TownRadius * 2, a_stage.houses());
-    sort(whole(towns));
-    do {
-        repeat (iteration, 100) {
+    repeat (combination, towns.size() == 2 ? 1 : 3) {
+        rotate(towns.begin(), towns.begin() + 1, towns.end());
+        repeat (iteration, 200) {
         Stage stage = a_stage;
         TargetManager target = {};
 
@@ -559,7 +559,7 @@ cerr << endl;
             result = outputs;
         }
         }
-    } while (next_permutation(whole(towns)));
+    }
 
 #ifdef LOCAL
     const char *green = "\x1b[32m";
